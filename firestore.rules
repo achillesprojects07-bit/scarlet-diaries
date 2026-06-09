@@ -1,4 +1,5 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -18,10 +19,6 @@ service cloud.firestore {
       return signedIn() && userDoc().data.role == "adult";
     }
 
-    function isChild() {
-      return signedIn() && userDoc().data.role == "child";
-    }
-
     match /users/{userId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
     }
@@ -38,7 +35,8 @@ service cloud.firestore {
 
       match /badges/{badgeId} {
         allow read: if sameFamily(familyId);
-        allow write: if isAdult() && sameFamily(familyId);
+        allow create: if sameFamily(familyId);
+        allow update, delete: if isAdult() && sameFamily(familyId);
       }
 
       match /alerts/{alertId} {
@@ -53,7 +51,8 @@ service cloud.firestore {
 
         match /settings/{settingId} {
           allow read: if sameFamily(familyId);
-          allow write: if isAdult() && sameFamily(familyId);
+          allow create: if sameFamily(familyId);
+          allow update, delete: if isAdult() && sameFamily(familyId);
         }
 
         match /mealLogs/{logId} {

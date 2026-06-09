@@ -17,6 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
+const BUILD = "V1.1";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -121,7 +122,10 @@ function layout(content, active="home"){
             <p class="small muted">Every drop. Every breath. Unstoppable.</p>
           </div>
         </div>
-        <button class="btn secondary" data-action="logout">Exit</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="build-tag">${BUILD}</span>
+          <button class="btn secondary" data-action="logout">Exit</button>
+        </div>
       </div>
       ${content}
       <nav class="nav">
@@ -147,33 +151,36 @@ function bindGlobal(){
 function renderLogin(){
   $app.innerHTML = `
     <section class="screen center">
-      <div class="brand-mark">SD</div>
-      <h1>The Scarlet Diaries</h1>
-      <p class="tagline">Every drop. Every breath. Unstoppable.</p>
-      <div class="card" style="width:100%;text-align:left">
-        <h2>Enter the diary</h2>
-        <p class="muted small">Use Firebase email/password accounts. Create test accounts first in Firebase Authentication or use “Create account.”</p>
-        <div class="field">
+      <div class="front-locket">
+        <div class="key-wrap">
+          <div class="key-glyph">🗝</div>
+        </div>
+        <div class="brand-mark" style="margin:0 auto 14px">SD</div>
+        <h1>The Scarlet Diaries</h1>
+        <p class="tagline">Every drop. Every breath. Unstoppable.</p>
+        <p class="build-tag" style="margin-top:10px">${BUILD}</p>
+        <p class="muted small" style="margin-top:14px">A private safety diary for Amara.</p>
+
+        <div class="field" style="margin-top:18px;text-align:left">
           <label>Email</label>
           <input id="email" type="email" placeholder="amara@example.com" autocomplete="email" />
         </div>
-        <div class="field">
+        <div class="field" style="text-align:left">
           <label>Password</label>
           <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
         </div>
-        <div class="field">
+        <div class="field" style="text-align:left">
           <label>Who is using this?</label>
           <select id="role">
             <option value="child">Amara</option>
             <option value="adult">Mom / Dad / Tita</option>
           </select>
         </div>
-        <div class="btn-row">
-          <button class="btn scarlet" id="loginBtn">Sign in</button>
+        <button class="unlock-btn" id="loginBtn">🗝 Unlock the Diary</button>
+        <div class="btn-row" style="justify-content:center;margin-top:10px">
           <button class="btn secondary" id="createBtn">Create account</button>
         </div>
       </div>
-      <p class="small muted">Phase 1 build. Medical settings must be reviewed by an adult.</p>
     </section>
   `;
   document.getElementById("loginBtn").onclick = async () => doLogin(false);
@@ -252,10 +259,7 @@ function renderHome(){
       <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
     </div>
   `, "home");
-  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => {
-    state.view = b.dataset.go;
-    render();
-  });
+  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { state.view = b.dataset.go; render(); });
 }
 
 function renderMealStart(){
@@ -414,8 +418,7 @@ function getCorrection(glucose){
 
 function renderMealEstimate(){
   const carbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
-  const rawCarbDose = carbs / Number(state.settings.carbRatio || 8);
-  const carbDose = roundDose(rawCarbDose);
+  const carbDose = roundDose(carbs / Number(state.settings.carbRatio || 8));
   const correction = getCorrection(Number(state.meal.glucose));
   const estimated = carbDose + correction;
   layout(`
@@ -753,8 +756,6 @@ async function createAlert(type, severity, message){
     createdAt:serverTimestamp(),
     enteredBy: state.user?.uid || null
   });
-  // Phase 1: alerts are stored in Firestore and visible in Parent Dashboard.
-  // Actual email delivery requires the Cloud Function/email provider.
 }
 
 async function unlockBadge(id){
@@ -797,7 +798,10 @@ function renderAdult(){
           <div class="logo-small">SD</div>
           <div><strong>Parent Dashboard</strong><p class="small muted">Mom · Dad · Tita</p></div>
         </div>
-        <button class="btn secondary" data-action="logout">Exit</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="build-tag">${BUILD}</span>
+          <button class="btn secondary" data-action="logout">Exit</button>
+        </div>
       </div>
       <div class="card dark">
         <h2>Amara’s Circle</h2>
