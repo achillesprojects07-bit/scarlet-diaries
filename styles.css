@@ -530,3 +530,13 @@ label{font-weight:900;color:var(--ivory)}
 .list-item[data-alert="critical"], .danger{
   box-shadow:0 0 28px rgba(189,30,50,.18);
 }
+
+
+/* V1.7 Phase 7 report tuning */
+@media (max-width:430px){
+  .nav{gap:4px}
+  .nav button{font-size:10px;padding:9px 3px}
+}
+@media (min-width:430px){
+  .nav button{font-size:11px}
+}

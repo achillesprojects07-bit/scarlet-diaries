@@ -1,29 +1,41 @@
-# The Scarlet Diaries — V1.6
+# The Scarlet Diaries — V1.7
 
-Phase 5 + Phase 6 build.
+Phase 7 build: Reports + Doctor Review.
 
-## Phase 5: The Scarlet Vault / Badges
+## Phase 7 added
 
-- Expanded dramatic badge collection
-- Stronger Scarlet Vault
-- Wall of Proof count and affirmation
-- More badges for Circle alerts, hidden carbs, ketones, family foods, emotional courage
-- Better unlocked badge glow styling
-- Badge unlocks tied to more real safety and diary actions
+- Reports tab
+- 7-day report
+- 14-day report
+- Glucose summary
+- Meal and carb summary
+- Estimated Apidra summary
+- Ketone and symptom summary
+- Mood / Scarlet Entry summary
+- Alert and acknowledgement summary
+- Downloadable text report
+- Save report snapshot to Firestore
+- Firestore rules updated for saved reports
 
-## Phase 6: Alerts + Notifications
+## Included from previous phases
 
-- Alert records remain saved in Firebase
-- Adult dashboard now shows alert status
-- Adults can tap **I saw this**
-- Alert acknowledgement is saved to Firestore
-- Alerts now include `emailStatus`
-- Firebase Functions folder added for email sending
-- `firebase.json` added for functions/rules deployment
-- Email sender template included using Nodemailer SMTP
+- Dark vampire-style login
+- Role selection: Amara / Mom / Dad / Tita
+- Unlock the Diary
+- Small Create account
+- Meal Mode
+- High and Low Safety Modes
+- Ketone prompt
+- Secret carbs checklist
+- Food & Carb Library
+- Open Food Facts packaged food search
+- Custom family foods
+- Scarlet Entry
+- Mood Mirror
+- Scarlet Vault
+- Alert records and adult acknowledgement
+- Firebase Functions email sender template
 
 ## Important
 
-Actual email delivery will only work after Firebase Functions is deployed and SMTP is configured.
-
-The app is a family safety assistant, not medical advice.
+Reports are summaries for family and clinician review. They are not medical advice.

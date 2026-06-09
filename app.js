@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.6";
+const BUILD = "V1.7";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -128,6 +128,7 @@ function render(){
     case "circle": return renderCircle();
     case "foods": return renderFoodLibrary();
     case "mood": return renderMoodMirror();
+    case "reports": return renderReports();
     default: return renderHome();
   }
 }
@@ -274,6 +275,7 @@ function layout(content, active="home"){
         <button class="${active==="foods"?"active":""}" data-view="foods">Foods</button>
         <button class="${active==="diary"?"active":""}" data-view="diary">Entry</button>
         <button class="${active==="vault"?"active":""}" data-view="vault">Vault</button>
+        <button class="${active==="reports"?"active":""}" data-view="reports">Reports</button>
       </nav>
     </div>
   `;
@@ -306,6 +308,7 @@ function renderHome(){
       <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Give your feelings a place to go.</span></button>
       <button class="action plum" data-go="vault"><strong>Open The Scarlet Vault</strong><span>Proof that you kept going.</span></button>
       <button class="action" data-go="mood"><strong>Mood Mirror</strong><span>See feelings without shame.</span></button>
+      <button class="action" data-go="reports"><strong>Reports</strong><span>7-day and 14-day summaries for adults and doctors.</span></button>
       <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
     </div>
   `, "home");
@@ -943,6 +946,180 @@ function showBadgeModal(id, onClose){
   document.getElementById("closeBadge").onclick = () => { div.remove(); onClose?.(); };
 }
 
+
+async function fetchChildCollection(name, days=14){
+  const snap = await getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,name), orderBy("createdAt","desc"), limit(250)));
+  const now = Date.now();
+  const cutoff = now - days * 24 * 60 * 60 * 1000;
+  return snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(x => {
+    const t = x.createdAt?.toMillis ? x.createdAt.toMillis() : now;
+    return t >= cutoff;
+  });
+}
+
+function average(nums){
+  const arr = nums.filter(n => typeof n === "number" && !isNaN(n));
+  if(!arr.length) return null;
+  return Math.round(arr.reduce((a,b)=>a+b,0)/arr.length);
+}
+
+function downloadText(filename, text){
+  const blob = new Blob([text], { type:"text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function reportToText(days, data){
+  const lines = [];
+  lines.push(`The Scarlet Diaries ${days}-Day Report`);
+  lines.push(`Child: Amara`);
+  lines.push(`Generated: ${new Date().toLocaleString()}`);
+  lines.push(``);
+  lines.push(`Glucose`);
+  lines.push(`- Readings logged: ${data.glucoseCount}`);
+  lines.push(`- Average glucose: ${data.avgGlucose ?? "Not enough data"} mg/dL`);
+  lines.push(`- Low readings < ${state.settings.lowThreshold}: ${data.lowCount}`);
+  lines.push(`- High readings >= ${state.settings.highThreshold}: ${data.highCount}`);
+  lines.push(`- Urgent high readings >= ${state.settings.urgentHighThreshold}: ${data.urgentHighCount}`);
+  lines.push(``);
+  lines.push(`Meals and insulin`);
+  lines.push(`- Meals logged: ${data.mealCount}`);
+  lines.push(`- Total carbs logged: ${data.totalCarbs}g`);
+  lines.push(`- Average carbs per meal: ${data.avgCarbs ?? "Not enough data"}g`);
+  lines.push(`- Insulin logs: ${data.insulinCount}`);
+  lines.push(`- Estimated Apidra total from meal logs: ${data.estimatedDoseTotal} units`);
+  lines.push(``);
+  lines.push(`Ketones and symptoms`);
+  lines.push(`- Ketone logs: ${data.ketoneCount}`);
+  lines.push(`- No strips logged: ${data.noStripsCount}`);
+  lines.push(`- Moderate/large ketones: ${data.moderateLargeKetones}`);
+  lines.push(`- Symptom logs: ${data.symptomCount}`);
+  lines.push(``);
+  lines.push(`Diary and mood`);
+  lines.push(`- Scarlet Entries: ${data.diaryCount}`);
+  lines.push(`- Mood logs: ${data.moodCount}`);
+  lines.push(`- Hard feelings logged: ${data.hardMoodCount}`);
+  lines.push(``);
+  lines.push(`Care notes`);
+  lines.push(`- Alerts created: ${data.alertCount}`);
+  lines.push(`- Alerts acknowledged: ${data.ackCount}`);
+  lines.push(``);
+  lines.push(`Important: This report is a family log summary, not medical advice. Share with a qualified diabetes clinician.`);
+  return lines.join("\\n");
+}
+
+async function buildReport(days){
+  const [mealLogs, glucoseLogs, insulinLogs, ketoneLogs, symptomLogs, diaryEntries, moodLogs] = await Promise.all([
+    fetchChildCollection("mealLogs", days),
+    fetchChildCollection("glucoseLogs", days),
+    fetchChildCollection("insulinLogs", days),
+    fetchChildCollection("ketoneLogs", days),
+    fetchChildCollection("symptomLogs", days),
+    fetchChildCollection("diaryEntries", days),
+    fetchChildCollection("moodLogs", days)
+  ]);
+
+  const alertsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"alerts"), orderBy("createdAt","desc"), limit(250)));
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const alerts = alertsSnap.docs.map(d => ({ id:d.id, ...d.data() })).filter(x => {
+    const t = x.createdAt?.toMillis ? x.createdAt.toMillis() : Date.now();
+    return t >= cutoff;
+  });
+
+  const glucoseFromMeals = mealLogs.map(x => Number(x.glucoseBeforeMeal)).filter(n => !isNaN(n));
+  const glucoseDirect = glucoseLogs.map(x => Number(x.glucose)).filter(n => !isNaN(n));
+  const allGlucose = [...glucoseFromMeals, ...glucoseDirect];
+
+  const carbs = mealLogs.map(x => Number(x.totalCarbs || 0));
+  const estimatedDoses = mealLogs.map(x => Number(x.estimatedDose || 0));
+
+  return {
+    days,
+    glucoseCount: allGlucose.length,
+    avgGlucose: average(allGlucose),
+    lowCount: allGlucose.filter(g => g < state.settings.lowThreshold).length,
+    highCount: allGlucose.filter(g => g >= state.settings.highThreshold).length,
+    urgentHighCount: allGlucose.filter(g => g >= state.settings.urgentHighThreshold).length,
+    mealCount: mealLogs.length,
+    totalCarbs: carbs.reduce((a,b)=>a+b,0),
+    avgCarbs: average(carbs),
+    insulinCount: insulinLogs.length,
+    estimatedDoseTotal: Math.round(estimatedDoses.reduce((a,b)=>a+b,0) * 10) / 10,
+    ketoneCount: ketoneLogs.length,
+    noStripsCount: ketoneLogs.filter(k => String(k.ketoneResult || "").toLowerCase().includes("no strips")).length,
+    moderateLargeKetones: ketoneLogs.filter(k => String(k.ketoneResult || "").toLowerCase().includes("moderate")).length,
+    symptomCount: symptomLogs.length,
+    diaryCount: diaryEntries.length,
+    moodCount: moodLogs.length,
+    hardMoodCount: moodLogs.filter(m => ["Sad","Angry","Scared","Lonely"].includes(m.mood)).length,
+    alertCount: alerts.length,
+    ackCount: alerts.filter(a => a.acknowledged).length
+  };
+}
+
+function reportCardsHtml(data){
+  return `
+    <div class="grid">
+      <div class="card"><h3>Glucose</h3><div class="kv"><span>Logs</span><strong>${data.glucoseCount}</strong></div><div class="kv"><span>Average</span><strong>${data.avgGlucose ?? "—"}</strong></div><div class="kv"><span>Lows</span><strong>${data.lowCount}</strong></div><div class="kv"><span>Highs</span><strong>${data.highCount}</strong></div></div>
+      <div class="card"><h3>Meals</h3><div class="kv"><span>Meals</span><strong>${data.mealCount}</strong></div><div class="kv"><span>Carbs</span><strong>${data.totalCarbs}g</strong></div><div class="kv"><span>Avg carbs</span><strong>${data.avgCarbs ?? "—"}</strong></div><div class="kv"><span>Est. Apidra</span><strong>${data.estimatedDoseTotal}u</strong></div></div>
+      <div class="card"><h3>Safety</h3><div class="kv"><span>Ketones</span><strong>${data.ketoneCount}</strong></div><div class="kv"><span>No strips</span><strong>${data.noStripsCount}</strong></div><div class="kv"><span>Symptoms</span><strong>${data.symptomCount}</strong></div><div class="kv"><span>Alerts</span><strong>${data.alertCount}</strong></div></div>
+      <div class="card"><h3>Heart</h3><div class="kv"><span>Entries</span><strong>${data.diaryCount}</strong></div><div class="kv"><span>Moods</span><strong>${data.moodCount}</strong></div><div class="kv"><span>Hard feelings</span><strong>${data.hardMoodCount}</strong></div><div class="kv"><span>Acknowledged</span><strong>${data.ackCount}</strong></div></div>
+    </div>
+  `;
+}
+
+async function renderReports(days=7){
+  layout(`
+    <div class="card dark">
+      <h2>Reports</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">For patterns, checkups, and better adult support.</p>
+    </div>
+    <div class="card">
+      <p class="muted small">Choose a report window. This is a family log summary, not medical advice.</p>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn ${days===7 ? "scarlet":"secondary"}" id="report7">7 days</button>
+        <button class="btn ${days===14 ? "scarlet":"secondary"}" id="report14">14 days</button>
+      </div>
+    </div>
+    <div id="reportBody" class="card"><p class="muted small">Building report…</p></div>
+  `, "reports");
+
+  document.getElementById("report7").onclick = () => renderReports(7);
+  document.getElementById("report14").onclick = () => renderReports(14);
+
+  const data = await buildReport(days);
+  const body = document.getElementById("reportBody");
+  body.className = "";
+  body.innerHTML = `
+    ${reportCardsHtml(data)}
+    <div class="card">
+      <h3>${days}-Day Summary</h3>
+      <p class="muted small">Use this to discuss patterns with a qualified diabetes clinician.</p>
+      <div class="divider-line"></div>
+      <button class="btn scarlet full" id="downloadReport">Download text report</button>
+      <button class="btn secondary full" style="margin-top:10px" id="saveReport">Save report snapshot</button>
+    </div>
+  `;
+  document.getElementById("downloadReport").onclick = () => {
+    downloadText(`scarlet-diaries-${days}-day-report.txt`, reportToText(days, data));
+  };
+  document.getElementById("saveReport").onclick = async () => {
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"reports"), {
+      days,
+      data,
+      createdAt:serverTimestamp(),
+      createdBy:state.user?.uid || null
+    });
+    toast("Report snapshot saved.");
+  };
+}
+
 function renderAdult(){
   $app.innerHTML = `
     <div class="screen">
@@ -963,6 +1140,10 @@ function renderAdult(){
       <div class="card">
         <h3>Needs Attention</h3>
         <div id="alertsList" class="list"><p class="muted small">Loading alerts…</p></div>
+      </div>
+      <div class="card">
+        <h3>Reports</h3>
+        <p class="muted small">7-day and 14-day summaries are now available from the Reports tab. Use them for checkups and pattern review.</p>
       </div>
       <div class="card">
         <h3>Notification Status</h3>

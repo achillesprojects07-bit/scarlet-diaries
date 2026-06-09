@@ -96,6 +96,11 @@ service cloud.firestore {
           allow read, create: if sameFamily(familyId);
           allow update, delete: if false;
         }
+
+        match /reports/{reportId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if isAdult() && sameFamily(familyId);
+        }
       }
     }
   }
