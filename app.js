@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V2.4";
+const BUILD = "V3.0";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -183,24 +183,54 @@ function renderLogin(){
         </div>
 
         <div class="login-card">
+          <!-- STEP 1: WHO ARE YOU -->
           <div id="roleSelection">
             <div class="login-prompt">Who are you?</div>
             <div class="role-buttons">
-              <button class="role-btn amara" data-role="amara"><span class="role-icon">🩸</span> I am Amara</button>
-              <button class="role-btn circle" data-role="mom"><span class="role-icon">🌙</span> I am Mom</button>
-              <button class="role-btn circle" data-role="dad"><span class="role-icon">⚡</span> I am Dad</button>
+              <button class="role-btn amara" data-role="amara">
+                <span class="role-icon">🩸</span>
+                <span>I am Amara</span>
+              </button>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <button class="role-btn circle" data-role="mom"><span class="role-icon">🌙</span> Mom</button>
+                <button class="role-btn circle" data-role="dad"><span class="role-icon">⚡</span> Dad</button>
+              </div>
               <button class="role-btn circle" data-role="tita"><span class="role-icon">🔮</span> I am Tita</button>
             </div>
           </div>
 
+          <!-- STEP 2: LOGIN FORM -->
           <div class="auth-form" id="authForm">
             <div class="form-title" id="formTitle">Enter Your Details</div>
             <div class="error-msg" id="errorMsg"></div>
             <input type="email" class="form-input" id="emailInput" placeholder="Email address" autocomplete="email" />
             <input type="password" class="form-input" id="passwordInput" placeholder="Password" autocomplete="current-password" />
-            <button class="submit-btn" id="loginBtn"><span>🗝</span> Unlock the Diary</button>
-            <button class="back-btn" id="backBtn">← Choose a different role</button>
-            <button class="create-small" id="createBtn">Create account</button><p class="small muted" style="text-align:center;margin-top:2px">Already created? Use Unlock the Diary above.</p>
+            <button class="submit-btn" id="loginBtn">
+              <span style="font-size:16px">🗝</span>
+              <span>Unlock the Diary</span>
+            </button>
+            <div style="display:flex;align-items:center;gap:12px;margin:4px 0">
+              <div style="flex:1;height:1px;background:rgba(176,28,46,0.18)"></div>
+              <span class="small" style="color:var(--ash);letter-spacing:1px">OR</span>
+              <div style="flex:1;height:1px;background:rgba(176,28,46,0.18)"></div>
+            </div>
+            <button class="create-small" id="createBtn">First time? Create this account</button>
+            <button class="back-btn" id="backBtn" style="margin-top:4px">← Choose a different role</button>
+          </div>
+
+          <!-- STEP 2b: FIRST TIME SETUP -->
+          <div class="auth-form" id="setupForm">
+            <div class="form-title" id="setupTitle">Create Your Account</div>
+            <p class="small muted" style="text-align:center;line-height:1.5;margin-bottom:4px">This is a private family app. Use the email agreed with the family.</p>
+            <div class="error-msg" id="setupErrorMsg"></div>
+            <input type="email" class="form-input" id="setupEmail" placeholder="Email address" autocomplete="email" />
+            <input type="password" class="form-input" id="setupPassword" placeholder="Choose a password" autocomplete="new-password" />
+            <input type="password" class="form-input" id="setupPassword2" placeholder="Confirm password" autocomplete="new-password" />
+            <button class="submit-btn" id="setupBtn">
+              <span style="font-size:16px">✦</span>
+              <span>Create My Account</span>
+            </button>
+            <button class="back-btn" id="backFromSetup" style="margin-top:4px">← Back to login</button>
           </div>
         </div>
 
@@ -216,17 +246,99 @@ function renderLogin(){
     document.getElementById("formTitle").textContent = roleTitle(state.selectedRole);
     hideError();
   });
+
+  // Back from login form
   document.getElementById("backBtn").onclick = () => {
     state.selectedRole = "";
     document.getElementById("roleSelection").style.display = "block";
     document.getElementById("authForm").classList.remove("visible");
+    document.getElementById("setupForm").classList.remove("visible");
     hideError();
   };
+
+  // Login
   document.getElementById("loginBtn").onclick = () => doLogin(false);
-  document.getElementById("createBtn").onclick = () => doLogin(true);
-  document.getElementById("passwordInput").onkeydown = (e) => {
-    if(e.key === "Enter") doLogin(false);
+  document.getElementById("passwordInput").onkeydown = e => { if(e.key === "Enter") doLogin(false); };
+
+  // Show setup form
+  document.getElementById("createBtn").onclick = () => {
+    document.getElementById("authForm").classList.remove("visible");
+    document.getElementById("setupForm").classList.add("visible");
+    const titles = { amara:"🩸 Create Amara's Account", mom:"🌙 Create Mom's Account", dad:"⚡ Create Dad's Account", tita:"🔮 Create Tita's Account" };
+    document.getElementById("setupTitle").textContent = titles[state.selectedRole] || "Create Account";
+    hideError();
   };
+
+  // Back from setup to login
+  document.getElementById("backFromSetup").onclick = () => {
+    document.getElementById("setupForm").classList.remove("visible");
+    document.getElementById("authForm").classList.add("visible");
+    hideErrorSetup();
+  };
+
+  // Create account
+  document.getElementById("setupBtn").onclick = () => doSetup();
+  document.getElementById("setupPassword2").onkeydown = e => { if(e.key === "Enter") doSetup(); };
+}
+
+function showErrorSetup(msg){
+  const el = document.getElementById("setupErrorMsg");
+  if(!el) return toast(msg);
+  el.textContent = msg;
+  el.classList.add("visible");
+}
+function hideErrorSetup(){
+  const el = document.getElementById("setupErrorMsg");
+  if(el) el.classList.remove("visible");
+}
+
+async function doSetup(){
+  const email = document.getElementById("setupEmail").value.trim();
+  const pass = document.getElementById("setupPassword").value;
+  const pass2 = document.getElementById("setupPassword2").value;
+  const roleKey = state.selectedRole || "amara";
+
+  if(!email) return showErrorSetup("Please enter an email address.");
+  if(!pass || pass.length < 6) return showErrorSetup("Password must be at least 6 characters.");
+  if(pass !== pass2) return showErrorSetup("Passwords do not match. Please try again.");
+
+  const btn = document.getElementById("setupBtn");
+  const restore = setBusy(btn, "Creating account…");
+  hideErrorSetup();
+
+  try {
+    state.loginInProgress = true;
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    const role = roleToStoredRole(roleKey);
+    await setDoc(doc(db,"users",cred.user.uid), {
+      email, role, roleKey,
+      familyId: FAMILY_ID,
+      displayName: role === "child" ? "Amara" : roleKey,
+      active: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }, { merge:true });
+
+    sessionStorage.setItem("scarletJustLoggedIn","yes");
+    state.user = cred.user;
+    state.role = role;
+    state.loginInProgress = false;
+    localStorage.setItem("scarletRole", role);
+    localStorage.setItem("scarletRoleKey", roleKey);
+    toast("Account created. Welcome to The Scarlet Diaries.");
+    await safeEnsureDefaults();
+    await loadData();
+    render();
+  } catch(err) {
+    state.loginInProgress = false;
+    restore();
+    if(err.code === "auth/email-already-in-use") showErrorSetup("This email already has an account. Use Unlock the Diary instead.");
+    else if(err.code === "auth/invalid-email") showErrorSetup("Please enter a valid email address.");
+    else if(err.code === "auth/weak-password") showErrorSetup("Please use a stronger password — at least 6 characters.");
+    else showErrorSetup(err.message || "Something went wrong. Please try again.");
+  } finally {
+    if(!state.pendingRepair) restore();
+  }
 }
 function showError(msg){
   const el = document.getElementById("errorMsg");
@@ -523,33 +635,89 @@ function bindGlobal(){
 }
 
 function renderHome(){
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   layout(`
-    <div class="card dark">
-      <p class="pill">Amara’s private safety diary</p>
-      <h2 class="hello-title" style="margin-top:12px">Hello, Amara.</h2>
-      <p class="tagline" style="text-align:left;margin-top:4px">What does your body need?</p>
+    <div class="card dark" style="padding:22px 20px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div class="scarlet-drop" style="width:34px;height:34px;margin-bottom:0;flex-shrink:0"></div>
+        <div>
+          <p class="small" style="color:var(--ash);letter-spacing:1px;text-transform:uppercase;font-size:10px">${greeting}</p>
+          <h2 class="hello-title" style="font-size:24px">Hello, Amara.</h2>
+        </div>
+      </div>
+      <p class="tagline" style="text-align:left;font-size:11px;letter-spacing:2.5px">What does your body need?</p>
+      <div class="divider-line" style="margin-top:14px"></div>
+      <p class="small" style="color:var(--ash);line-height:1.6;margin-top:10px">Always show the suggested dose to your Circle before injecting.</p>
     </div>
-    <div class="card">
-      <h3>Safety first</h3>
-      <p class="muted small">This app gives an estimate from the saved family plan. It must never be treated as an order to inject. If unsure, call the Circle.</p>
-    </div>
+
+    <p class="small" style="color:var(--ash);letter-spacing:1.5px;text-transform:uppercase;padding:0 2px">Safety</p>
     <div class="grid">
-      <button class="action scarlet" data-go="meal"><strong>Before I Eat</strong><span>Check sugar, choose food, then see a suggested dose.</span></button>
-      <button class="action" data-go="high"><strong>My Sugar Is High</strong><span>Slow down, check safety, alert the Circle.</span></button>
-      <button class="action" data-go="low"><strong>My Sugar Is Low</strong><span>No insulin now. Protect yourself first.</span></button>
-      <button class="action" data-go="insulin"><strong>I Took Insulin</strong><span>Log Apidra or Lantus.</span></button>
-      <button class="action" data-go="feel"><strong>I Don’t Feel Well</strong><span>Tell the diary what your body feels.</span></button>
-      <button class="action" data-go="foods"><strong>Food & Carb Library</strong><span>Favorites, saved foods, packaged foods, and the big food database.</span></button>
-      <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Give your feelings a place to go.</span></button>
-      <button class="action plum" data-go="pages"><strong>My Scarlet Pages</strong><span>Reread the words that prove you kept going.</span></button>
-      <button class="action plum" data-go="vault"><strong>Open The Scarlet Vault</strong><span>Proof that you kept going.</span></button>
-      <button class="action" data-go="mood"><strong>Mood Mirror</strong><span>See feelings without shame.</span></button>
-      <button class="action" data-go="reports"><strong>Reports</strong><span>7-day and 14-day summaries for adults and doctors.</span></button>
-      <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
+      <button class="action scarlet" data-go="meal" style="grid-column:1/-1;min-height:80px">
+        <strong style="font-size:17px">\uD83E\uDE78 Before I Eat</strong>
+        <span>Check sugar &middot; Choose food &middot; See suggested dose</span>
+      </button>
+      <button class="action" data-go="high">
+        <strong>\uD83D\uDD25 Sugar Is High</strong>
+        <span>Slow down. Check safety. Alert the Circle.</span>
+      </button>
+      <button class="action" data-go="low">
+        <strong>\u2744\uFE0F Sugar Is Low</strong>
+        <span>No insulin now. Protect yourself first.</span>
+      </button>
+      <button class="action" data-go="insulin">
+        <strong>\uD83D\uDC89 I Took Insulin</strong>
+        <span>Log Apidra or Lantus.</span>
+      </button>
+      <button class="action" data-go="feel">
+        <strong>\uD83E\uDEB7 Don\'t Feel Well</strong>
+        <span>Tell the diary how you feel.</span>
+      </button>
+    </div>
+
+    <p class="small" style="color:var(--ash);letter-spacing:1.5px;text-transform:uppercase;padding:0 2px;margin-top:4px">Your Diary</p>
+    <div class="grid">
+      <button class="action plum" data-go="diary" style="grid-column:1/-1">
+        <strong>Write a Scarlet Entry</strong>
+        <span>Give your feelings a place to go.</span>
+      </button>
+      <button class="action plum" data-go="pages">
+        <strong>My Scarlet Pages</strong>
+        <span>Reread your words.</span>
+      </button>
+      <button class="action plum" data-go="vault">
+        <strong>The Scarlet Vault</strong>
+        <span>Your courage marks.</span>
+      </button>
+    </div>
+
+    <p class="small" style="color:var(--ash);letter-spacing:1.5px;text-transform:uppercase;padding:0 2px;margin-top:4px">More</p>
+    <div class="grid">
+      <button class="action" data-go="foods">
+        <strong>Food Library</strong>
+        <span>Favorites, saved, packaged foods.</span>
+      </button>
+      <button class="action" data-go="mood">
+        <strong>Mood Mirror</strong>
+        <span>See feelings without shame.</span>
+      </button>
+      <button class="action" data-go="reports">
+        <strong>Reports</strong>
+        <span>7 and 14-day summaries.</span>
+      </button>
+      <button class="action" data-go="circle">
+        <strong>Call My Circle</strong>
+        <span>Mom &middot; Dad &middot; Tita</span>
+      </button>
+    </div>
+
+    <div class="card" style="text-align:center;padding:14px;background:rgba(122,0,18,0.06)">
+      <p class="small" style="color:var(--ash);font-style:italic;line-height:1.6;font-family:var(--font-serif);font-size:15px">&ldquo;Every drop. Every breath. Unstoppable.&rdquo;</p>
     </div>
   `, "home");
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { state.view = b.dataset.go; render(); });
 }
+
 
 function renderMealStart(){
   state.meal = { type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" };
@@ -1024,6 +1192,7 @@ async function saveMealLog(extra={}){
   });
   await unlockBadge("scarlet-sentinel");
   await unlockBadge("feast-reader");
+  const actualDose = extra.actualDose ?? estimatedDose;
   if(extra.autoLogInsulin && actualDose){
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
       insulinType:"Apidra",
@@ -1594,6 +1763,279 @@ function renderEmergency(message){
   };
 }
 
+/* ═══════════════════════════════════════════════
+   FOOD LIBRARY SCREEN
+   ═══════════════════════════════════════════════ */
+function renderFoodLibrary(){
+  const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs"];
+  layout(`
+    <div class="card dark">
+      <button class="btn secondary" id="backFromFoods" style="margin-bottom:12px">← Back Home</button>
+      <h2>Food Library</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Browse, search, or add family foods.</p>
+    </div>
+
+    <div class="card">
+      <h3>Choose a food group</h3>
+      <div class="food-category-grid" style="margin-top:12px">
+        ${categories.map(c => `<button class="food-chip ${state.foodCategory===c?"active":""}" data-cat="${c}">${c}</button>`).join("")}
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Search by name</label>
+        <input id="libSearch" value="${esc(state.foodSearch || "")}" placeholder="Try: rice, pita, juice, sinigang…" />
+      </div>
+      <div id="libResults" class="food-results" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Add a Family Food</h3>
+      <p class="muted small" style="margin-top:6px">Add foods Amara eats often. Adults can confirm carb counts.</p>
+      <div class="field"><label>Food name</label><input id="newFoodName" placeholder="Example: Mom's adobo" /></div>
+      <div class="field"><label>Usual portion</label><input id="newFoodPortion" placeholder="Example: 1 cup" /></div>
+      <div class="field"><label>Carbs (grams)</label><input id="newFoodCarbs" type="number" inputmode="numeric" placeholder="Example: 32" /></div>
+      <div class="field"><label>Calories (optional)</label><input id="newFoodCals" type="number" inputmode="numeric" placeholder="Example: 180" /></div>
+      <div class="field">
+        <label>Category</label>
+        <select id="newFoodCat">
+          ${["Meals","Breakfast Favorites","Meal Favorites","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs"].map(c=>`<option>${c}</option>`).join("")}
+        </select>
+      </div>
+      <button class="btn scarlet full" id="addFoodBtn" style="margin-top:6px">Save to Family Library</button>
+    </div>
+  `, "foods");
+
+  document.getElementById("backFromFoods").onclick = () => { state.view = "home"; render(); };
+
+  document.querySelectorAll("[data-cat]").forEach(btn => btn.onclick = () => {
+    state.foodCategory = btn.dataset.cat;
+    state.foodSearch = "";
+    renderFoodLibrary();
+  });
+
+  const searchEl = document.getElementById("libSearch");
+  if(searchEl){
+    searchEl.oninput = () => { state.foodSearch = searchEl.value; drawLibResults(); };
+  }
+
+  function drawLibResults(){
+    const results = document.getElementById("libResults");
+    if(!results) return;
+    let foods = state.foods.filter(f => f.active !== false);
+    const term = (state.foodSearch || "").toLowerCase().trim();
+
+    if(state.foodCategory && state.foodCategory !== "All"){
+      foods = foods.filter(f => f.category === state.foodCategory);
+    }
+    if(term){
+      foods = foods.filter(f => `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().includes(term));
+    }
+    foods = foods.sort((a,b) => Number(!!b.verified) - Number(!!a.verified) || String(a.name).localeCompare(String(b.name))).slice(0,50);
+
+    if(!foods.length){
+      results.innerHTML = `<p class="muted small">No foods found. Try a different search or add one below.</p>`;
+      return;
+    }
+    results.innerHTML = foods.map(f => `
+      <div class="food-card">
+        <div>
+          <strong>${esc(f.name)}</strong>
+          <span class="small muted">${esc(f.usualPortion || f.portion || "serving")} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
+          <div class="confidence">${esc(f.category || "Food")} · ${f.verified ? "Family verified" : (f.source || "Library")}</div>
+        </div>
+        <span class="pill">${Number(f.usualCarbs ?? f.carbs ?? 0)}g</span>
+      </div>
+    `).join("");
+  }
+  drawLibResults();
+
+  document.getElementById("addFoodBtn").onclick = async () => {
+    const btn = document.getElementById("addFoodBtn");
+    const name = document.getElementById("newFoodName").value.trim();
+    const portion = document.getElementById("newFoodPortion").value.trim();
+    const carbs = Number(document.getElementById("newFoodCarbs").value);
+    const calories = Number(document.getElementById("newFoodCals").value) || 0;
+    const category = document.getElementById("newFoodCat").value;
+    if(!name) return toast("Please enter a food name.");
+    if(!carbs || carbs <= 0) return toast("Please enter the carb amount.");
+    const restore = setBusy(btn, "Saving…");
+    try {
+      const newFood = { name, usualPortion:portion, usualCarbs:carbs, carbs, portion, calories, category, source:"Family Verified", verified:true, active:true, createdAt:serverTimestamp(), addedBy:state.user.uid };
+      await addDoc(collection(db,"families",FAMILY_ID,"foodLibrary"), newFood);
+      state.foods.push(newFood);
+      toast(`${name} saved to the family library.`);
+      document.getElementById("newFoodName").value = "";
+      document.getElementById("newFoodPortion").value = "";
+      document.getElementById("newFoodCarbs").value = "";
+      document.getElementById("newFoodCals").value = "";
+      drawLibResults();
+    } catch(err) {
+      toast("Could not save food. Please try again.");
+    } finally {
+      restore();
+    }
+  };
+}
+
+/* ═══════════════════════════════════════════════
+   REPORTS SCREEN
+   ═══════════════════════════════════════════════ */
+async function renderReports(){
+  layout(`
+    <div class="card dark">
+      <button class="btn secondary" id="backFromReports" style="margin-bottom:12px">← Back</button>
+      <h2>Reports</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Patterns for adults and doctors.</p>
+    </div>
+    <div class="card" id="reportContent">
+      <p class="muted small">Loading reports…</p>
+    </div>
+  `, state.role === "child" ? "home" : "adult");
+
+  document.getElementById("backFromReports").onclick = () => {
+    state.view = state.role === "child" ? "home" : "adult";
+    render();
+  };
+
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+    const [glucoseSnap, mealSnap, insulinSnap, moodSnap] = await Promise.all([
+      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), orderBy("createdAt","desc"), limit(100))),
+      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs"), orderBy("createdAt","desc"), limit(100))),
+      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), orderBy("createdAt","desc"), limit(100))),
+      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), orderBy("createdAt","desc"), limit(30)))
+    ]);
+
+    const glucoseLogs = glucoseSnap.docs.map(d => d.data());
+    const mealLogs = mealSnap.docs.map(d => d.data());
+    const insulinLogs = insulinSnap.docs.map(d => d.data());
+    const moodLogs = moodSnap.docs.map(d => d.data());
+
+    const inDays = (logs, days) => {
+      const since = Date.now() - days * 24 * 60 * 60 * 1000;
+      return logs.filter(l => l.createdAt?.toDate?.()?.getTime?.() > since || true);
+    };
+
+    const g7 = glucoseLogs.slice(0, Math.min(glucoseLogs.length, 30));
+    const avgGlucose = g7.length ? Math.round(g7.reduce((s,l) => s + (Number(l.glucose)||0), 0) / g7.length) : null;
+    const highs = g7.filter(l => Number(l.glucose) >= (state.settings.highThreshold||250)).length;
+    const lows = g7.filter(l => Number(l.glucose) < (state.settings.lowThreshold||70)).length;
+    const meals7 = mealLogs.slice(0, 21);
+    const avgCarbs = meals7.length ? Math.round(meals7.reduce((s,m) => s + (Number(m.totalCarbs)||0), 0) / meals7.length) : null;
+    const insulinCount = insulinLogs.slice(0,21).length;
+    const moods7 = moodLogs.slice(0,14);
+    const moodCounts = moods7.reduce((acc,m) => { acc[m.mood] = (acc[m.mood]||0)+1; return acc; }, {});
+    const topMoods = Object.entries(moodCounts).sort((a,b)=>b[1]-a[1]).slice(0,4);
+
+    const reportEl = document.getElementById("reportContent");
+    if(!reportEl) return;
+    reportEl.innerHTML = `
+      <h3>7-Day Summary</h3>
+      <div style="margin-top:12px">
+        ${avgGlucose !== null ? `<div class="kv"><span>Average glucose</span><strong>${avgGlucose} mg/dL</strong></div>` : ""}
+        <div class="kv"><span>High readings</span><strong>${highs} reading${highs!==1?"s":""}</strong></div>
+        <div class="kv"><span>Low readings</span><strong>${lows} reading${lows!==1?"s":""}</strong></div>
+        <div class="kv"><span>Meals logged</span><strong>${meals7.length}</strong></div>
+        ${avgCarbs !== null ? `<div class="kv"><span>Avg carbs per meal</span><strong>${avgCarbs}g</strong></div>` : ""}
+        <div class="kv"><span>Insulin doses logged</span><strong>${insulinCount}</strong></div>
+      </div>
+      <div class="divider-line" style="margin:14px 0"></div>
+      <h3>Mood Pattern</h3>
+      <div style="margin-top:12px">
+        ${topMoods.length ? topMoods.map(([mood,count]) => `
+          <div class="kv"><span>${esc(mood)}</span><strong>${count}×</strong></div>
+        `).join("") : `<p class="muted small">No mood entries yet.</p>`}
+      </div>
+      <div class="divider-line" style="margin:14px 0"></div>
+      <h3>Recent Glucose Readings</h3>
+      <div class="list" style="margin-top:10px">
+        ${g7.slice(0,10).map(l => {
+          const g = Number(l.glucose);
+          const color = g >= (state.settings.urgentHighThreshold||300) ? "var(--danger2)" : g >= (state.settings.highThreshold||250) ? "var(--warn)" : g < (state.settings.lowThreshold||70) ? "var(--danger2)" : "var(--gold)";
+          const ts = l.createdAt?.toDate?.()?.toLocaleString?.() || "—";
+          return `<div class="list-item">
+            <div>
+              <strong style="color:${color}">${g} mg/dL</strong>
+              <span class="small muted">${esc(l.context || "glucose check")} · ${ts}</span>
+            </div>
+            <span class="pill" style="font-size:11px">${g >= (state.settings.highThreshold||250) ? "High" : g < (state.settings.lowThreshold||70) ? "Low" : "OK"}</span>
+          </div>`;
+        }).join("") || `<p class="muted small">No glucose logs yet.</p>`}
+      </div>
+      <div class="divider-line" style="margin:14px 0"></div>
+      <p class="small muted">PDF export and full 14-day report coming in a future phase.</p>
+    `;
+  } catch(err) {
+    const reportEl = document.getElementById("reportContent");
+    if(reportEl) reportEl.innerHTML = `<p class="muted small">Could not load reports. Check your connection and try again.</p><p class="small" style="color:var(--danger2);margin-top:8px">${esc(err.message || "")}</p>`;
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   MY SCARLET PAGES — Diary Archive
+   ═══════════════════════════════════════════════ */
+async function renderScarletPages(){
+  layout(`
+    <div class="card dark">
+      <button class="btn secondary" id="backFromPages" style="margin-bottom:12px">← Back Home</button>
+      <h2>My Scarlet Pages</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Every word you wrote is proof you kept going.</p>
+    </div>
+    <div id="pagesContent">
+      <div class="card"><p class="muted small">Loading your entries…</p></div>
+    </div>
+  `, "diary");
+
+  document.getElementById("backFromPages").onclick = () => { state.view = "home"; render(); };
+
+  try {
+    const snap = await getDocs(query(
+      collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"),
+      orderBy("createdAt","desc"),
+      limit(50)
+    ));
+
+    const el = document.getElementById("pagesContent");
+    if(!el) return;
+
+    if(snap.empty){
+      el.innerHTML = `
+        <div class="card" style="text-align:center;padding:28px 20px">
+          <p style="font-family:var(--font-serif);font-size:20px;color:var(--scarlet);font-style:italic">The pages are waiting.</p>
+          <p class="small muted" style="margin-top:8px;line-height:1.6">When you write a Scarlet Entry, it will live here forever.</p>
+          <button class="btn scarlet full" style="margin-top:16px" id="writeFirstEntry">Write Your First Entry</button>
+        </div>`;
+      const btn = document.getElementById("writeFirstEntry");
+      if(btn) btn.onclick = () => { state.view = "diary"; render(); };
+      return;
+    }
+
+    el.innerHTML = snap.docs.map(d => {
+      const entry = d.data();
+      const ts = entry.createdAt?.toDate?.()?.toLocaleDateString?.("en-PH", { year:"numeric", month:"long", day:"numeric" }) || "—";
+      const isPrivate = entry.privacy === "private";
+      const moodColor = ["Sad","Angry","Scared","Lonely"].includes(entry.mood) ? "var(--scarlet)" : ["Brave","Proud","Strong","Hopeful"].includes(entry.mood) ? "var(--gold)" : "var(--dust)";
+      return `
+        <div class="card" style="border-left:3px solid ${moodColor};margin-bottom:0">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
+            <div>
+              <p class="small" style="color:${moodColor};font-weight:700;letter-spacing:0.5px">${esc(entry.mood || "")}</p>
+              <p class="small muted">${ts}</p>
+            </div>
+            ${isPrivate ? `<span class="pill" style="font-size:10px;opacity:0.7">Private</span>` : `<span class="pill" style="font-size:10px;background:rgba(201,168,76,0.12);color:var(--gold)">Shared</span>`}
+          </div>
+          ${entry.prompt && entry.prompt !== "I want to write this my own way…" ? `<p class="small" style="color:var(--ash);font-style:italic;margin-bottom:8px">${esc(entry.prompt)}</p>` : ""}
+          <p style="line-height:1.7;color:var(--cream);font-family:var(--font-serif);font-size:16px">${esc(entry.entry || "")}</p>
+        </div>`;
+    }).join("");
+
+  } catch(err) {
+    const el = document.getElementById("pagesContent");
+    if(el) el.innerHTML = `<div class="card"><p class="muted small">Could not load diary entries. Check your connection.</p></div>`;
+  }
+}
+
 async function addKetoneLog(glucose, ketoneResult){
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), { glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid, alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange" });
 }
@@ -1775,47 +2217,75 @@ function renderDemoResetDone(counts){
 }
 
 function renderAdult(){
+  const roleKey = localStorage.getItem("scarletRoleKey") || "adult";
+  const roleNames = { mom:"Mom", dad:"Dad", tita:"Tita" };
+  const roleName = roleNames[roleKey] || "Circle";
   $app.innerHTML = `
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
           <div class="logo-small"><span>SD</span></div>
-          <div class="topbar-title"><strong>Parent Dashboard</strong><p class="small muted">Mom · Dad · Tita</p></div>
+          <div class="topbar-title">
+            <strong>The Circle</strong>
+            <p class="small muted">Amara's Guardian Dashboard</p>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="build-tag">${BUILD}</span>
           <button class="btn secondary" data-action="logout">Exit</button>
         </div>
       </div>
-      <div class="card dark">
-        <h2>Amara’s Circle</h2>
-        <p class="tagline" style="text-align:left;margin-top:6px">Celebrate effort, not perfect glucose.</p>
+
+      <div class="card dark" style="padding:22px 20px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="scarlet-drop" style="width:34px;height:34px;margin-bottom:0;flex-shrink:0"></div>
+          <div>
+            <p class="small" style="color:var(--ash);letter-spacing:1px;text-transform:uppercase;font-size:10px">Welcome back</p>
+            <h2 style="font-family:var(--font-serif);font-size:22px;font-weight:400">${esc(roleName)}</h2>
+          </div>
+        </div>
+        <div class="divider-line" style="margin-top:14px"></div>
+        <p class="small" style="color:var(--ash);line-height:1.6;margin-top:10px;font-style:italic">"Celebrate effort, not perfect glucose."</p>
       </div>
+
       <div class="card">
         <h3>Needs Attention</h3>
-        <div id="alertsList" class="list"><p class="muted small">Loading alerts…</p></div>
+        <div id="alertsList" class="list" style="margin-top:10px"><p class="muted small">Loading alerts...</p></div>
       </div>
+
+      <div class="grid" style="margin-top:0">
+        <button class="action scarlet" id="openReportsBtn">
+          <strong>Open Reports</strong>
+          <span>7-day and 14-day summaries</span>
+        </button>
+        <button class="action plum" id="openVaultAdult">
+          <strong>Scarlet Vault</strong>
+          <span>Amara's courage marks</span>
+        </button>
+      </div>
+
       <div class="card">
-        <h3>Reports</h3>
-        <p class="muted small">7-day and 14-day summaries are available for adult pattern review.</p>
-        <button class="btn scarlet full" style="margin-top:12px" id="openReportsBtn">Open Reports</button>
+        <h3>Amara's Settings</h3>
+        <div class="kv"><span>Rapid insulin</span><strong>${esc(state.settings.rapidInsulin || "Apidra")}</strong></div>
+        <div class="kv"><span>Carb ratio</span><strong>1 unit per ${state.settings.carbRatio}g</strong></div>
+        <div class="kv"><span>Dose rounding</span><strong>Nearest ${state.settings.doseRounding} unit</strong></div>
+        <div class="kv"><span>Low threshold</span><strong>Below ${state.settings.lowThreshold} mg/dL</strong></div>
+        <div class="kv"><span>High alert</span><strong>${state.settings.highThreshold}+ mg/dL</strong></div>
+        <div class="kv"><span>Urgent high</span><strong>${state.settings.urgentHighThreshold}+ mg/dL</strong></div>
+        <div class="kv"><span>Correction above 180</span><strong>+${state.settings.preMealCorrection180} units</strong></div>
+        <div class="kv"><span>Correction above 250</span><strong>+${state.settings.preMealCorrection250} units</strong></div>
+        <p class="small muted" style="margin-top:10px">Settings are locked. Contact the family doctor to update the plan.</p>
       </div>
+
+      <div class="card">
+        <h3>Alert Emails</h3>
+        <p class="muted small" style="margin-top:6px;line-height:1.6">Alert records are saved in Firebase. Email delivery activates after deploying Firebase Functions. Update the alert email addresses in Firebase settings.</p>
+      </div>
+
       <div class="card danger">
         <h3>Demo Tools</h3>
-        <p class="muted small">For demo/testing only. This clears logs, diary entries, mood records, alerts, badges, and reports while keeping accounts and settings.</p>
+        <p class="muted small">Clears all logs, diary, alerts, and badges. Keeps accounts and settings intact.</p>
         <button class="btn red full" style="margin-top:12px" id="resetDemoBtn">Reset Demo Data</button>
-      </div>
-      <div class="card">
-        <h3>Notification Status</h3>
-        <p class="muted small">Phase 6 adds Firebase alert records, adult acknowledgement, and backend email function files. Email sending activates after deploying the included Firebase Functions setup.</p>
-      </div>
-      <div class="card">
-        <h3>Settings</h3>
-        <div class="kv"><span>Carb ratio</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
-        <div class="kv"><span>Dose rounding</span><strong>Nearest ${state.settings.doseRounding} unit</strong></div>
-        <div class="kv"><span>High alert</span><strong>${state.settings.highThreshold}+</strong></div>
-        <div class="kv"><span>Urgent high</span><strong>${state.settings.urgentHighThreshold}+</strong></div>
-        <p class="small muted" style="margin-top:10px">Settings are locked. Alert records are stored in Firebase; actual email delivery will be connected in the notification phase.</p>
       </div>
     </div>`;
   bindGlobal();
@@ -1823,6 +2293,8 @@ function renderAdult(){
   if(resetBtn) resetBtn.onclick = () => renderDemoReset();
   const openReportsBtn = document.getElementById("openReportsBtn");
   if(openReportsBtn) openReportsBtn.onclick = () => renderReports();
+  const openVaultAdult = document.getElementById("openVaultAdult");
+  if(openVaultAdult) openVaultAdult.onclick = () => renderVault();
 
   const alertsRef = collection(db,"families",FAMILY_ID,"alerts");
   onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
