@@ -4,8 +4,8 @@
   "description": "Every drop. Every breath. Unstoppable.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#fff7ea",
-  "theme_color": "#7f1024",
+  "background_color": "#090608",
+  "theme_color": "#14090d",
   "icons": [
     {
       "src": "icons/icon-192.svg",

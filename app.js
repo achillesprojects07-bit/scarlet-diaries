@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.1";
+const BUILD = "V1.3";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -151,13 +151,13 @@ function bindGlobal(){
 function renderLogin(){
   $app.innerHTML = `
     <section class="screen center">
-      <div class="front-locket">
-        <div class="key-wrap">
-          <div class="key-glyph">🗝</div>
+      <div class="front-cover">
+        <div class="cover-locket">
+          <div class="brand-locket">SD</div>
         </div>
-        <div class="brand-mark" style="margin:0 auto 14px">SD</div>
         <h1>The Scarlet Diaries</h1>
         <p class="tagline">Every drop. Every breath. Unstoppable.</p>
+        <div class="subtle-divider"></div>
         <p class="build-tag" style="margin-top:10px">${BUILD}</p>
         <p class="muted small" style="margin-top:14px">A private safety diary for Amara.</p>
 
@@ -176,7 +176,7 @@ function renderLogin(){
             <option value="adult">Mom / Dad / Tita</option>
           </select>
         </div>
-        <button class="unlock-btn" id="loginBtn">🗝 Unlock the Diary</button>
+        <button class="unlock-btn" id="loginBtn"><span class="key-inline">🗝</span>Unlock the Diary</button>
         <div class="btn-row" style="justify-content:center;margin-top:10px">
           <button class="btn secondary" id="createBtn">Create account</button>
         </div>
@@ -246,7 +246,7 @@ function renderHome(){
     <div class="card dark">
       <p class="pill">Amara’s private safety diary</p>
       <h2 style="margin-top:12px">Hello, Amara.</h2>
-      <p class="tagline" style="color:var(--gold-soft)">What does your body need?</p>
+      <p class="tagline" style="color:var(--gold-2)">What does your body need?</p>
     </div>
     <div class="grid">
       <button class="action scarlet" data-go="meal"><strong>I’m Eating</strong><span>Check sugar, count carbs, estimate safely.</span></button>
@@ -425,7 +425,7 @@ function renderMealEstimate(){
     <div class="card dark">
       <p class="pill">Estimated dose, not a command</p>
       <h2 style="margin-top:10px">Estimated Apidra: ${estimated} units</h2>
-      <p class="tagline" style="color:var(--gold-soft)">Show this to your Circle before injecting.</p>
+      <p class="tagline" style="color:var(--gold-2)">Show this to your Circle before injecting.</p>
     </div>
     <div class="card">
       <div class="kv"><span>Pre-meal glucose</span><strong>${state.meal.glucose} mg/dL</strong></div>
@@ -634,7 +634,7 @@ function renderDiary(){
   layout(`
     <div class="card dark">
       <h2>Write a Scarlet Entry</h2>
-      <p class="tagline" style="color:var(--gold-soft)">Give your feelings a place to go.</p>
+      <p class="tagline" style="color:var(--gold-2)">Give your feelings a place to go.</p>
     </div>
     <div class="card">
       <div class="field">
@@ -675,8 +675,8 @@ function renderVault(){
   layout(`
     <div class="card dark">
       <h2>The Scarlet Vault</h2>
-      <p class="tagline" style="color:var(--gold-soft)">Proof that you kept going.</p>
-      <p class="small" style="margin-top:10px;color:rgba(255,247,234,.8)">These are not prizes for perfect numbers. These are marks of courage — for checking, telling the truth, asking for help, and staying.</p>
+      <p class="tagline" style="color:var(--gold-2)">Proof that you kept going.</p>
+      <p class="small" style="margin-top:10px;color:var(--muted)">These are not prizes for perfect numbers. These are marks of courage — for checking, telling the truth, asking for help, and staying.</p>
     </div>
     <div class="card">
       <h3>The Wall of Proof</h3>
@@ -707,7 +707,7 @@ function renderCircle(){
   layout(`
     <div class="card dark">
       <h2>Call My Circle</h2>
-      <p class="tagline" style="color:var(--gold-soft)">Mom. Dad. Tita.</p>
+      <p class="tagline" style="color:var(--gold-2)">Mom. Dad. Tita.</p>
     </div>
     <div class="grid single">
       ${CIRCLE.map(name => `
@@ -805,7 +805,7 @@ function renderAdult(){
       </div>
       <div class="card dark">
         <h2>Amara’s Circle</h2>
-        <p class="tagline" style="color:var(--gold-soft)">Celebrate effort, not perfect glucose.</p>
+        <p class="tagline" style="color:var(--gold-2)">Celebrate effort, not perfect glucose.</p>
       </div>
       <div class="card">
         <h3>Needs Attention</h3>
