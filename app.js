@@ -17,6 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
+const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
   childName: "Amara",
@@ -31,7 +32,7 @@ const DEFAULT_SETTINGS = {
   preMealCorrection250: 4,
   ketonePromptThreshold: 250,
   insulinStackingHours: 3,
-  alertEmails: ["mom@example.com", "dad@example.com", "aileen@example.com"],
+  alertEmails: ["mom@example.com", "dad@example.com", "tita@example.com"],
   updatedAt: null
 };
 
@@ -61,7 +62,7 @@ const BADGES = [
   { id:"feast-reader", section:"Secrets of the Plate", name:"The Feast Reader", desc:"You read the plate like a secret map.", rule:"Complete a meal calculation." },
   { id:"ketone-seer", section:"The Dark Signals", name:"The Ketone Seer", desc:"You read the warning signs.", rule:"Check ketones during a high sugar day." },
   { id:"truth-keeper", section:"The Dark Signals", name:"The Truth Keeper", desc:"You told the truth, and the Circle can help.", rule:"Log that ketone strips are missing or unavailable." },
-  { id:"caller-circle", section:"The Circle", name:"Caller of the Circle", desc:"You were brave enough to call your guardians.", rule:"Ask Mom, Dad, or Aileen for help." },
+  { id:"caller-circle", section:"The Circle", name:"Caller of the Circle", desc:"You were brave enough to call your guardians.", rule:"Ask Mom, Dad, or Tita for help." },
   { id:"brave-page", section:"The Written Heart", name:"The Brave Page", desc:"You gave your feelings a place to go.", rule:"Write a Scarlet Entry." },
   { id:"girl-who-stayed", section:"The Written Heart", name:"The Girl Who Stayed", desc:"Even on a hard day, you remained.", rule:"Write after choosing sad, angry, or scared." },
   { id:"seven-scarlet-days", section:"The Unstoppable Line", name:"Seven Scarlet Days", desc:"Seven days. Seven proofs that you kept going.", rule:"Use the app for 7 days." }
@@ -72,7 +73,6 @@ let state = {
   role:null,
   settings: DEFAULT_SETTINGS,
   foods: STARTER_FOODS,
-  recentLogs: [],
   unlockedBadges: new Set(),
   view:"home",
   meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" }
@@ -165,7 +165,7 @@ function renderLogin(){
           <label>Who is using this?</label>
           <select id="role">
             <option value="child">Amara</option>
-            <option value="adult">Mom / Dad / Aileen</option>
+            <option value="adult">Mom / Dad / Tita</option>
           </select>
         </div>
         <div class="btn-row">
@@ -176,12 +176,8 @@ function renderLogin(){
       <p class="small muted">Phase 1 build. Medical settings must be reviewed by an adult.</p>
     </section>
   `;
-  document.getElementById("loginBtn").onclick = async () => {
-    await doLogin(false);
-  };
-  document.getElementById("createBtn").onclick = async () => {
-    await doLogin(true);
-  };
+  document.getElementById("loginBtn").onclick = async () => doLogin(false);
+  document.getElementById("createBtn").onclick = async () => doLogin(true);
 }
 
 async function doLogin(create=false){
@@ -253,7 +249,7 @@ function renderHome(){
       <button class="action" data-go="feel"><strong>I Don’t Feel Well</strong><span>Tell the diary what your body feels.</span></button>
       <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Give your feelings a place to go.</span></button>
       <button class="action plum" data-go="vault"><strong>Open The Scarlet Vault</strong><span>Proof that you kept going.</span></button>
-      <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Aileen.</span></button>
+      <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
     </div>
   `, "home");
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => {
@@ -411,7 +407,6 @@ function roundDose(raw){
 }
 
 function getCorrection(glucose){
-  if(glucose >= state.settings.preMealCorrection250 + 9999) return 0; // never used; safety guard
   if(glucose > 250) return Number(state.settings.preMealCorrection250 || 4);
   if(glucose > 180) return Number(state.settings.preMealCorrection180 || 2);
   return 0;
@@ -440,9 +435,7 @@ function renderMealEstimate(){
     </div>
     <div class="grid single">
       <button class="action scarlet" id="adultConfirmed"><strong>Adult confirmed</strong><span>Save meal and insulin estimate.</span></button>
-      <button class="action" data-call="Mom"><strong>I need Mom</strong><span>Alert the Circle.</span></button>
-      <button class="action" data-call="Dad"><strong>I need Dad</strong><span>Alert the Circle.</span></button>
-      <button class="action" data-call="Aileen"><strong>I need Aileen</strong><span>Alert the Circle.</span></button>
+      ${CIRCLE.map(name => `<button class="action" data-call="${name}"><strong>I need ${name}</strong><span>Alert the Circle.</span></button>`).join("")}
       <button class="action" id="alone"><strong>I am alone</strong><span>Send alert and save safety note.</span></button>
       <button class="action" id="injected"><strong>I already injected</strong><span>Log actual insulin and alert adults.</span></button>
     </div>
@@ -711,10 +704,10 @@ function renderCircle(){
   layout(`
     <div class="card dark">
       <h2>Call My Circle</h2>
-      <p class="tagline" style="color:var(--gold-soft)">Mom. Dad. Aileen.</p>
+      <p class="tagline" style="color:var(--gold-soft)">Mom. Dad. Tita.</p>
     </div>
     <div class="grid single">
-      ${["Mom","Dad","Aileen"].map(name => `
+      ${CIRCLE.map(name => `
         <button class="action" data-person="${name}">
           <strong>I need ${name}</strong>
           <span>Save alert request to the dashboard and email system.</span>
@@ -734,7 +727,7 @@ function renderEmergency(message){
     <div class="card danger">
       <h2>Adult help needed now</h2>
       <p>${esc(message)}</p>
-      <p class="muted" style="margin-top:10px">Tell Mom, Dad, or Aileen now. If vomiting, stomach pain, very sleepy, confused, or breathing fast/deep, adults should seek urgent medical help.</p>
+      <p class="muted" style="margin-top:10px">Tell Mom, Dad, or Tita now. If vomiting, stomach pain, very sleepy, confused, or breathing fast/deep, adults should seek urgent medical help.</p>
       <button class="btn red full" id="alertCircle">Alert My Circle</button>
     </div>
   `, "home");
@@ -760,8 +753,8 @@ async function createAlert(type, severity, message){
     createdAt:serverTimestamp(),
     enteredBy: state.user?.uid || null
   });
-  // Phase 1 email alerts: this client-side build logs alert records.
-  // To actually send email, deploy the Cloud Function in functions/index.js.
+  // Phase 1: alerts are stored in Firestore and visible in Parent Dashboard.
+  // Actual email delivery requires the Cloud Function/email provider.
 }
 
 async function unlockBadge(id){
@@ -802,7 +795,7 @@ function renderAdult(){
       <div class="topbar">
         <div class="logo-lockup">
           <div class="logo-small">SD</div>
-          <div><strong>Parent Dashboard</strong><p class="small muted">Mom · Dad · Aileen</p></div>
+          <div><strong>Parent Dashboard</strong><p class="small muted">Mom · Dad · Tita</p></div>
         </div>
         <button class="btn secondary" data-action="logout">Exit</button>
       </div>
