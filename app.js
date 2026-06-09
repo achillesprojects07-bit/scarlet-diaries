@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.8";
+const BUILD = "V1.9";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -192,7 +192,7 @@ function renderLogin(){
             <input type="password" class="form-input" id="passwordInput" placeholder="Password" autocomplete="current-password" />
             <button class="submit-btn" id="loginBtn"><span>🗝</span> Unlock the Diary</button>
             <button class="back-btn" id="backBtn">← Choose a different role</button>
-            <button class="create-small" id="createBtn">Create account</button>
+            <button class="create-small" id="createBtn">Create account</button><p class="small muted" style="text-align:center;margin-top:2px">Already created? Use Unlock the Diary above.</p>
           </div>
         </div>
 
@@ -240,8 +240,9 @@ async function doLogin(create=false){
 
   const btn = create ? document.getElementById("createBtn") : document.getElementById("loginBtn");
   const originalText = btn ? btn.innerHTML : "";
+
   try{
-    if(btn){ btn.disabled = true; btn.innerHTML = create ? "Creating…" : "Unlocking…"; }
+    if(btn){ btn.disabled = true; btn.innerHTML = create ? "Creating account…" : "Unlocking…"; }
     hideError();
 
     const cred = create
@@ -249,16 +250,10 @@ async function doLogin(create=false){
       : await signInWithEmailAndPassword(auth, email, pass);
 
     const userRef = doc(db,"users",cred.user.uid);
-    const userSnap = await getDoc(userRef);
+    let userSnap = await getDoc(userRef);
 
     if(create){
-      if(userSnap.exists()){
-        const existing = userSnap.data();
-        if(existing.roleKey && existing.roleKey !== roleKey){
-          await signOut(auth);
-          return showError("This email is already assigned to a different profile.");
-        }
-      }
+      // First-time bootstrap: users can create only their own profile under the Firestore rules.
       await setDoc(userRef, {
         email,
         role,
@@ -269,21 +264,24 @@ async function doLogin(create=false){
         createdAt:serverTimestamp(),
         updatedAt:serverTimestamp()
       }, { merge:true });
-      await ensureDefaults();
-    }else{
-      if(!userSnap.exists()){
-        await signOut(auth);
-        return showError("This account has no Scarlet profile yet. Please create the correct account first.");
-      }
-      const profile = userSnap.data();
-      if(profile.roleKey !== roleKey || profile.role !== role){
-        await signOut(auth);
-        return showError("This account is not assigned to this profile. Please choose the correct profile.");
-      }
-      if(profile.active === false){
-        await signOut(auth);
-        return showError("This account is not active. Please ask an adult to check it.");
-      }
+      userSnap = await getDoc(userRef);
+      toast("Account created. Unlocking diary…");
+    }
+
+    if(!userSnap.exists()){
+      await signOut(auth);
+      return showError("Account created in Firebase Auth, but no Scarlet profile exists yet. Please tap Create account for the correct role.");
+    }
+
+    const profile = userSnap.data();
+    if(profile.roleKey !== roleKey || profile.role !== role){
+      await signOut(auth);
+      return showError("This account is not assigned to this profile. Please choose the correct profile.");
+    }
+
+    if(profile.active === false){
+      await signOut(auth);
+      return showError("This account is not active. Please ask an adult to check it.");
     }
 
     sessionStorage.setItem("scarletJustLoggedIn","yes");
@@ -291,17 +289,31 @@ async function doLogin(create=false){
     state.role = role;
     localStorage.setItem("scarletRole", role);
     localStorage.setItem("scarletRoleKey", roleKey);
+
+    await safeEnsureDefaults();
     await loadData();
     render();
+
   }catch(err){
     console.error(err);
     if(err.code === "auth/invalid-email") showError("Please enter a valid email address.");
     else if(err.code === "auth/email-already-in-use") showError("This email already has an account. Use Unlock the Diary instead.");
     else if(err.code === "auth/weak-password") showError("Please use a stronger password.");
     else if(err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") showError("Incorrect email or password. Try again.");
+    else if(String(err.message || "").toLowerCase().includes("permission")) showError("Firebase permissions blocked setup. Please publish the V1.9 firestore.rules file, then try again.");
     else showError(err.message || "Something went wrong. Please try again.");
   }finally{
     if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
+  }
+}
+
+async function safeEnsureDefaults(){
+  try{
+    await ensureDefaults();
+  }catch(err){
+    console.warn("Starter setup skipped or blocked:", err);
+    // Do not block login just because starter food/badge seeding failed.
+    // The app can still open, and adults can publish rules or add data later.
   }
 }
 
@@ -330,10 +342,20 @@ async function loadData(){
   try{
     const settingsSnap = await getDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"));
     if(settingsSnap.exists()) state.settings = { ...DEFAULT_SETTINGS, ...settingsSnap.data() };
-    const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
-    if(!foodsSnap.empty) state.foods = foodsSnap.docs.map(d => ({ id:d.id, ...d.data() }));
-    const unlockSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
-    state.unlockedBadges = new Set(unlockSnap.docs.map(d => d.id));
+    try{
+      const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
+      if(!foodsSnap.empty) state.foods = foodsSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+    }catch(foodErr){
+      console.warn("Food library unavailable, using starter foods.", foodErr);
+      state.foods = STARTER_FOODS;
+    }
+    try{
+      const unlockSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
+      state.unlockedBadges = new Set(unlockSnap.docs.map(d => d.id));
+    }catch(badgeErr){
+      console.warn("Badge unlocks unavailable yet.", badgeErr);
+      state.unlockedBadges = new Set();
+    }
   }catch(err){ console.warn("Data load issue:", err); }
 }
 

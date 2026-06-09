@@ -561,3 +561,14 @@ button:disabled{
   min-height:38px;
   line-height:1.15;
 }
+
+
+/* V1.9 Firestore login hotfix */
+.create-small + .small{
+  color:var(--dim);
+  font-size:11px;
+  letter-spacing:.5px;
+}
+.error-msg{
+  line-height:1.35;
+}

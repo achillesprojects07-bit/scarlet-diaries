@@ -7,25 +7,53 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserDoc() {
+      return signedIn() && exists(userPath());
+    }
+
     function userDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return get(userPath());
     }
 
     function sameFamily(familyId) {
-      return signedIn() && userDoc().data.familyId == familyId;
+      return hasUserDoc() && userDoc().data.familyId == familyId;
     }
 
     function isAdult() {
-      return signedIn() && userDoc().data.role == "adult";
+      return hasUserDoc() && userDoc().data.role == "adult";
     }
 
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // User profile bootstrap.
+    // A newly authenticated user may create only their own user document.
     match /users/{userId} {
-      allow read, write: if signedIn() && request.auth.uid == userId;
+      allow create: if isSelf(userId)
+        && request.resource.data.familyId is string
+        && request.resource.data.role in ["child", "adult"]
+        && request.resource.data.roleKey in ["amara", "mom", "dad", "tita"]
+        && request.resource.data.email is string;
+
+      allow read: if isSelf(userId);
+
+      allow update: if isSelf(userId)
+        && request.resource.data.familyId == resource.data.familyId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.roleKey == resource.data.roleKey;
+
+      allow delete: if false;
     }
 
     match /families/{familyId} {
       allow read: if sameFamily(familyId);
-      allow write: if isAdult() && sameFamily(familyId);
+      allow create: if isAdult() && sameFamily(familyId);
+      allow update, delete: if isAdult() && sameFamily(familyId);
 
       match /foodLibrary/{foodId} {
         allow read: if sameFamily(familyId);
@@ -41,13 +69,14 @@ service cloud.firestore {
 
       match /alerts/{alertId} {
         allow read, create: if sameFamily(familyId);
-        allow update: if isAdult() && sameFamily(familyId);
+        allow update: if sameFamily(familyId);
         allow delete: if false;
       }
 
       match /children/{childId} {
         allow read: if sameFamily(familyId);
-        allow write: if isAdult() && sameFamily(familyId);
+        allow create: if sameFamily(familyId);
+        allow update, delete: if isAdult() && sameFamily(familyId);
 
         match /settings/{settingId} {
           allow read: if sameFamily(familyId);

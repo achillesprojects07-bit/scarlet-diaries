@@ -1,32 +1,38 @@
-# The Scarlet Diaries — V1.8 Correction Build
+# The Scarlet Diaries — V1.9 Firestore/Login Hotfix
 
-This build addresses the logged testing comments.
+This is a Firebase/Auth/Firestore hotfix.
 
-## Login fixes
-- App no longer auto-opens straight to Amara on reload.
-- Role validation added: an email must match its assigned roleKey/role.
-- Wrong role selection is blocked.
-- Login flow optimized to avoid repeatedly seeding starter data.
+## Fixes
 
-## Flow fixes
-- Home button wording changed from “I’m Eating” to “Before I Eat.”
-- High sugar flow now gives next steps and suggested correction from the saved family plan.
-- Low sugar flow now gives next steps and no-insulin guidance.
-- Symptoms flow now gives next steps after saving.
-- Call My Circle flow now shows a clear finish screen.
-- Badge modal has Continue and Back Home to prevent freezing.
-- Save/add status messages added: Saving…, Saved, Adding…, Alert saved.
+- Corrected Firestore rules for first-time user profile creation.
+- A signed-in user can now create/read only their own `/users/{uid}` profile.
+- Role validation remains strict:
+  - Amara email can only enter Amara
+  - Mom email can only enter Mom
+  - Dad email can only enter Dad
+  - Tita email can only enter Tita
+- Login no longer depends on family starter-data seeding succeeding.
+- If starter food/badge setup is blocked, the app still opens using built-in starter foods.
+- Better error message for permissions issue.
+- Added note: “Already created? Use Unlock the Diary above.”
+- V1.9 shown in the app.
 
-## Meal and food fixes
-- Before I Eat computes suggested Apidra from glucose + food carbs + correction.
-- Food results now have explicit Add buttons.
-- Food database categories changed to:
-  Favorites, Saved Foods, Meals, Rice/Bread/Grains, Snacks/Sweets, Fruits, Drinks, Hidden Carbs, Packaged Foods, Big Food Database.
-- Filipino and Greek are no longer main categories; they should be tags.
-- Food database has Edit buttons.
-- Food edit allows name, category, portion, carbs, calories, tags, favorite.
+## Very important setup step
 
-## Diary fixes
-- Scarlet Entry has “Something only I can name” for feelings.
-- Prompt includes “I want to write this my own way…”
-- My Scarlet Pages added for rereading saved entries.
+After uploading this build to GitHub, you must also publish the included `firestore.rules` in Firebase Console:
+
+Firebase Console → Firestore Database → Rules → paste `firestore.rules` → Publish
+
+Without publishing the V1.9 rules, Create account and Unlock the Diary can still show:
+“Missing or insufficient permissions.”
+
+## Recommended account setup
+
+Create one account per profile:
+
+- Amara account, selected as Amara
+- Mom account, selected as Mom
+- Dad account, selected as Dad
+- Tita account, selected as Tita
+
+Do not use the same email for every role.
