@@ -5,7 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, collection, addDoc, setDoc, doc, getDoc, getDocs, query,
-  where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc
+  where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc, deleteDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 import { firebaseConfig } from "./firebase-config.js";
@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V2.0";
+const BUILD = "V2.2";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -90,7 +90,9 @@ let state = {
   foods: STARTER_FOODS,
   unlockedBadges: new Set(),
   view:"home",
-  foodTab:"Favorites",
+  foodTab:"My Usual Foods",
+  foodCategory:"My Usual Foods",
+  foodSearch:"",
   meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" }
 };
 
@@ -447,11 +449,22 @@ async function loadData(){
     const settingsSnap = await getDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"));
     if(settingsSnap.exists()) state.settings = { ...DEFAULT_SETTINGS, ...settingsSnap.data() };
     try{
-      const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
-      if(!foodsSnap.empty) state.foods = foodsSnap.docs.map(d => ({ id:d.id, ...d.data() }));
-    }catch(foodErr){
-      console.warn("Food library unavailable, using starter foods.", foodErr);
+      const localFoods = await fetch("./foods.json").then(r => r.ok ? r.json() : []);
+      if(Array.isArray(localFoods) && localFoods.length) state.foods = localFoods.map(f => ({ active:true, verified:true, ...f }));
+    }catch(localErr){
+      console.warn("Local foods.json unavailable, using starter foods.", localErr);
       state.foods = STARTER_FOODS;
+    }
+    try{
+      const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
+      if(!foodsSnap.empty){
+        const firestoreFoods = foodsSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+        const map = new Map(state.foods.map(f => [f.id || f.name, f]));
+        firestoreFoods.forEach(f => map.set(f.id || f.name, f));
+        state.foods = Array.from(map.values());
+      }
+    }catch(foodErr){
+      console.warn("Firestore food library unavailable; using local foods.json.", foodErr);
     }
     try{
       const unlockSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
@@ -493,6 +506,13 @@ function layout(content, active="home"){
   bindGlobal();
 }
 function bindGlobal(){
+  document.querySelectorAll("button").forEach(btn => {
+    if(btn.dataset.tapBound) return;
+    btn.dataset.tapBound = "1";
+    btn.addEventListener("pointerdown", () => btn.classList.add("is-pressed"));
+    btn.addEventListener("pointerup", () => setTimeout(()=>btn.classList.remove("is-pressed"), 120));
+    btn.addEventListener("pointerleave", () => btn.classList.remove("is-pressed"));
+  });
   document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => { state.view = btn.dataset.view; render(); });
   const logoutBtn = document.querySelector("[data-action='logout']");
   if(logoutBtn) logoutBtn.onclick = () => signOut(auth);
@@ -602,89 +622,194 @@ function foodConfidence(f){
 }
 
 function renderFoodBuilder(){
+  const categories = ["My Usual Foods","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Hidden Carbs","Search","Add Food"];
+  const total = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
   const itemsHtml = state.meal.items.map((it,i)=>`
-    <div class="list-item">
+    <div class="list-item meal-item">
       <div>
         <strong>${esc(it.name)}</strong>
         <span class="small muted">${esc(it.portion)} · ${it.carbs}g carbs</span>
-        <div class="confidence">${esc(foodConfidence(it))}</div>
+        <div class="confidence">${esc(it.source || "Food list")}</div>
       </div>
       <button class="btn secondary" data-remove="${i}">Remove</button>
     </div>
-  `).join("") || `<p class="muted small">No foods added yet.</p>`;
+  `).join("") || `<p class="muted small">No foods added yet. Tap Add beside a food below.</p>`;
 
-  const total = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
   layout(`
-    <div class="card">
-      <h2>Add Food</h2>
-      <p class="muted">Family verified foods appear first. Database search is available for packaged food names.</p>
-      <div class="food-source-tabs wide-tabs">
-        ${["Favorites","Saved Foods","Meals","Rice, Bread & Grains","Snacks & Sweets","Fruits","Drinks","Hidden Carbs","Packaged Foods","Big Food Database"].map(t => `<button class="tab-btn ${state.foodTab===t ? "active":""}" data-tab="${t}">${t}</button>`).join("")}
-      </div>
-      <div class="field">
-        <label>Search food</label>
-        <input id="foodSearch" placeholder="rice, pita, juice, cereal…" />
-      </div>
-      <div id="foodResults" class="list"></div>
-      <button class="btn secondary full" id="customFood">Add custom family food</button>
+    <div class="card dark">
+      <h2>Choose Food</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Tap what is on your plate.</p>
     </div>
-    <div class="card">
+
+    <div class="card meal-summary-sticky">
       <h3>Meal so far</h3>
       <div class="list">${itemsHtml}</div>
       <div class="divider-line"></div>
-      <div class="kv"><span>Total carbs</span><strong>${total}g</strong></div>
-      <button class="btn scarlet full" id="hiddenCarbs">Check secret carbs</button>
+      <div class="kv"><span>Total food carbs</span><strong>${total}g</strong></div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn scarlet" id="goHidden">Next: Hidden Carbs</button>
+        <button class="btn secondary" id="skipHidden">Skip Hidden Carbs</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Food groups</h3>
+      <div class="food-category-grid">
+        ${categories.map(c => `<button class="food-chip ${state.foodCategory===c ? "active":""}" data-food-cat="${c}">${c}</button>`).join("")}
+      </div>
+      ${state.foodCategory === "Search" ? `
+        <div class="field">
+          <label>Search all foods</label>
+          <input id="foodSearch" value="${esc(state.foodSearch || "")}" placeholder="Try rice, milk, juice…" />
+        </div>
+      ` : ""}
+      <div id="foodResults" class="list food-results"></div>
     </div>
   `, "meal");
 
-  document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => { state.foodTab = btn.dataset.tab; renderFoodBuilder(); });
-  const input = document.getElementById("foodSearch");
-  const results = document.getElementById("foodResults");
+  document.querySelectorAll("[data-food-cat]").forEach(btn => btn.onclick = () => {
+    btn.classList.add("selected-flash");
+    state.foodCategory = btn.dataset.foodCat;
+    state.foodSearch = "";
+    if(state.foodCategory === "Add Food") renderCustomFoodForm("meal");
+    else renderFoodBuilder();
+  });
 
-  async function draw(){
-    const term = input.value.toLowerCase().trim();
+  const searchInput = document.getElementById("foodSearch");
+  if(searchInput){
+    searchInput.oninput = () => {
+      state.foodSearch = searchInput.value;
+      drawFoodResults();
+    };
+  }
 
-    if(state.foodTab === "Big Food Database"){
-      results.innerHTML = `<p class="muted small">The large USDA FoodData Central search needs an API key setup before it can search live. Use Packaged Foods for label foods, or add a custom family food.</p>`;
-      return;
-    }
+  function drawFoodResults(){
+    const results = document.getElementById("foodResults");
+    let foods = state.foods.filter(f => f.active !== false);
 
-    if(state.foodTab === "Packaged Foods" && term.length >= 3){
-      results.innerHTML = `<p class="muted small">Searching packaged food database…</p>`;
-      const dbFoods = await searchOpenFoodFacts(term);
-      if(!dbFoods.length){
-        results.innerHTML = `<p class="muted small">No packaged results found. Try a simpler name or add custom family food.</p>`;
-        return;
+    if(state.foodCategory === "My Usual Foods"){
+      foods = foods.filter(f => f.favorite || f.verified || String(f.category).includes("Usual"));
+    }else if(state.foodCategory === "Search"){
+      const term = (state.foodSearch || "").toLowerCase().trim();
+      if(term){
+        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
+      }else{
+        foods = foods.filter(f => f.favorite).slice(0,10);
       }
-      results.innerHTML = dbFoods.map((f,i)=>foodButtonHtml(f,i)).join("");
-      results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => {
-        state.meal.items.push(dbFoods[Number(btn.dataset.food)]);
-        toast("Food added.");
-        renderFoodBuilder();
-      });
+    }else{
+      foods = foods.filter(f => f.category === state.foodCategory);
+    }
+
+    foods = foods.sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite) || String(a.name).localeCompare(String(b.name))).slice(0,18);
+
+    if(!foods.length){
+      results.innerHTML = `<p class="muted small">No food found here. Try Search or Add Food.</p>`;
       return;
     }
 
-    let foods = state.foods.slice();
-    if(state.foodTab === "Favorites") foods = foods.filter(f => f.favorite || f.verified);
-    else if(state.foodTab === "Saved Foods") foods = foods.filter(f => f.verified || f.source === "Family Verified" || f.source === "Family starter");
-    else if(state.foodTab !== "Packaged Foods") foods = foods.filter(f => f.category === state.foodTab);
+    results.innerHTML = foods.map((f,i)=>`
+      <div class="food-card">
+        <div>
+          <strong>${esc(f.name)}</strong>
+          <span class="small muted">${esc(f.usualPortion || f.portion || "usual serving")} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
+        </div>
+        <button class="btn scarlet" data-choose-food="${i}">Choose</button>
+      </div>
+    `).join("");
 
-    if(term) foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
-
-    foods = foods.sort((a,b) => Number(!!b.favorite) - Number(!!a.favorite) || Number(!!b.verified) - Number(!!a.verified)).slice(0,12);
-    results.innerHTML = foods.map((f,i)=>foodButtonHtml(f,i)).join("") || `<p class="muted small">No food found here. Try another category or add custom family food.</p>`;
-    results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => {
-      state.meal.items.push(foods[Number(btn.dataset.food)]);
-      toast("Food added.");
-      renderFoodBuilder();
+    results.querySelectorAll("[data-choose-food]").forEach(btn => btn.onclick = () => {
+      const food = foods[Number(btn.dataset.chooseFood)];
+      renderPortionChooser(food);
     });
   }
-  input.oninput = draw; draw();
 
-  document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => { state.meal.items.splice(Number(btn.dataset.remove),1); renderFoodBuilder(); });
-  document.getElementById("hiddenCarbs").onclick = renderHiddenCarbs;
-  document.getElementById("customFood").onclick = () => renderCustomFoodForm("meal");
+  drawFoodResults();
+
+  document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => {
+    state.meal.items.splice(Number(btn.dataset.remove),1);
+    toast("Removed.");
+    renderFoodBuilder();
+  });
+  document.getElementById("goHidden").onclick = () => {
+    if(!state.meal.items.length) return toast("Add at least one food first.");
+    renderHiddenCarbs();
+  };
+  document.getElementById("skipHidden").onclick = () => {
+    if(!state.meal.items.length) return toast("Add at least one food first.");
+    state.meal.hiddenChecked = true;
+    renderMealEstimate();
+  };
+}
+
+function renderPortionChooser(food){
+  const portions = [
+    { label:"Small", portion: food.smallPortion || "small serving", carbs:Number(food.smallCarbs ?? Math.round(Number(food.carbs || 0) * .5)) },
+    { label:"Usual", portion: food.usualPortion || food.portion || "usual serving", carbs:Number(food.usualCarbs ?? food.carbs ?? 0) },
+    { label:"Large", portion: food.largePortion || "large serving", carbs:Number(food.largeCarbs ?? Math.round(Number(food.carbs || 0) * 1.5)) }
+  ];
+
+  layout(`
+    <div class="card dark">
+      <h2>${esc(food.name)}</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Choose the closest portion.</p>
+    </div>
+    <div class="grid single">
+      ${portions.map((p,i)=>`
+        <button class="action" data-portion="${i}">
+          <strong>${esc(p.label)} — ${esc(p.portion)}</strong>
+          <span>${p.carbs}g carbs</span>
+        </button>
+      `).join("")}
+      <button class="action" id="customPortionBtn"><strong>Custom carbs</strong><span>Use this if an adult knows the carb count.</span></button>
+      <button class="action" id="backFoods"><strong>Back to foods</strong><span>Choose another food.</span></button>
+    </div>
+  `, "meal");
+
+  document.querySelectorAll("[data-portion]").forEach(btn => btn.onclick = () => {
+    const restore = setBusy(btn, "Adding…");
+    const p = portions[Number(btn.dataset.portion)];
+    state.meal.items.push({
+      ...food,
+      portion: p.portion,
+      carbs: p.carbs,
+      calories: Math.round(Number(food.calories || 0) * (p.carbs / Math.max(Number(food.carbs || food.usualCarbs || p.carbs || 1),1)))
+    });
+    setTimeout(() => {
+      restore();
+      btn.classList.add("added");
+      toast("Food added.");
+      renderFoodBuilder();
+    }, 180);
+  });
+
+  document.getElementById("customPortionBtn").onclick = () => renderCustomPortion(food);
+  document.getElementById("backFoods").onclick = () => renderFoodBuilder();
+}
+
+function renderCustomPortion(food){
+  layout(`
+    <div class="card">
+      <h2>Custom Carbs</h2>
+      <p class="muted">Use this only if an adult or label knows the carb count.</p>
+      <div class="field"><label>Portion description</label><input id="customPortionText" placeholder="Example: half plate, 1 pack, 3 pieces" /></div>
+      <div class="field"><label>Carbs</label><input id="customPortionCarbs" type="number" inputmode="numeric" placeholder="grams of carbs" /></div>
+      <button class="btn scarlet full" id="addCustomPortion">Add to meal</button>
+      <button class="btn secondary full" style="margin-top:10px" id="cancelCustomPortion">Cancel</button>
+    </div>
+  `, "meal");
+
+  document.getElementById("cancelCustomPortion").onclick = () => renderPortionChooser(food);
+  document.getElementById("addCustomPortion").onclick = () => {
+    const btn = document.getElementById("addCustomPortion");
+    const restore = setBusy(btn, "Adding…");
+    const portion = document.getElementById("customPortionText").value.trim() || "custom portion";
+    const carbs = Number(document.getElementById("customPortionCarbs").value);
+    if(isNaN(carbs)){ restore(); return toast("Enter carbs."); }
+    state.meal.items.push({ ...food, portion, carbs });
+    restore();
+    toast("Food added.");
+    renderFoodBuilder();
+  };
 }
 
 function foodButtonHtml(f,i){
@@ -727,46 +852,76 @@ async function searchOpenFoodFacts(term){
 }
 
 function renderFoodLibrary(){
-  const categories = ["Favorites","Saved Foods","Meals","Rice, Bread & Grains","Snacks & Sweets","Fruits","Drinks","Hidden Carbs","Packaged Foods","Big Food Database"];
-  const active = state.foodTab || "Favorites";
-  let foods = state.foods.slice();
-  if(active === "Favorites") foods = foods.filter(f => f.favorite || f.verified);
-  else if(active === "Saved Foods") foods = foods.filter(f => f.verified || f.source === "Family Verified" || f.source === "Family starter");
-  else if(active === "Big Food Database") foods = [];
-  else if(active === "Packaged Foods") foods = [];
+  const categories = ["My Usual Foods","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Hidden Carbs","Search","Add Food"];
+  const active = state.foodCategory || "My Usual Foods";
+  let foods = state.foods.filter(f => f.active !== false);
+
+  if(active === "My Usual Foods") foods = foods.filter(f => f.favorite || f.verified || String(f.category).includes("Usual"));
+  else if(active === "Search") foods = foods.slice(0,0);
+  else if(active === "Add Food") foods = [];
   else foods = foods.filter(f => f.category === active);
 
   layout(`
     <div class="card dark">
       <h2>Food & Carb Library</h2>
-      <p class="tagline">Find carbs before insulin is estimated.</p>
-      <p class="muted small" style="margin-top:8px">Filipino and Greek should be tags, not main categories. Categories follow how Amara actually eats.</p>
+      <p class="tagline" style="text-align:left;margin-top:6px">Simple foods. Clear portions. Dependable carbs.</p>
     </div>
     <div class="card">
-      <div class="food-source-tabs wide-tabs">
-        ${categories.map(t => `<button class="tab-btn ${active===t ? "active":""}" data-food-tab="${t}">${t}</button>`).join("")}
+      <div class="food-category-grid">
+        ${categories.map(t => `<button class="food-chip ${active===t ? "active":""}" data-food-tab="${t}">${t}</button>`).join("")}
       </div>
-      <button class="btn scarlet full" id="addCustomFood">Add custom family food</button>
+      ${active === "Search" ? `<div class="field"><label>Search all foods</label><input id="librarySearch" placeholder="Try rice, milk, juice…" /></div><div id="librarySearchResults" class="list"></div>` : ""}
+      ${active === "Add Food" ? `<button class="btn scarlet full" id="addCustomFood">Add custom family food</button>` : ""}
       <div class="divider-line"></div>
-      ${active === "Big Food Database" ? `<p class="muted small">USDA FoodData Central needs API-key setup before live search can be enabled. This will be connected in the database integration build.</p>` : ""}
-      ${active === "Packaged Foods" ? `<p class="muted small">Packaged food search appears inside Before I Eat. Search by food name after choosing Packaged Foods.</p>` : ""}
-      <div class="list">
-        ${foods.slice().sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite)||Number(!!b.verified)-Number(!!a.verified)).slice(0,60).map(f => `
+      <div class="list" id="libraryFoods">
+        ${foods.slice().sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite)||String(a.name).localeCompare(String(b.name))).slice(0,60).map(f => `
           <div class="list-item">
             <div>
               <strong>${esc(f.name)}</strong>
-              <span class="small muted">${esc(f.category)} · ${esc(f.portion)} · ${Number(f.carbs||0)}g carbs</span>
-              <div class="confidence">${esc(foodConfidence(f))}</div>
+              <span class="small muted">${esc(f.usualPortion || f.portion)} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
+              <div class="confidence">${esc(f.source || "Food list")}</div>
             </div>
             <button class="btn secondary" data-edit-food="${esc(f.id || "")}">Edit</button>
           </div>
-        `).join("") || (active === "Big Food Database" || active === "Packaged Foods" ? "" : `<p class="muted small">No foods in this category yet.</p>`)}
+        `).join("") || (active === "Search" || active === "Add Food" ? "" : `<p class="muted small">No foods in this group yet.</p>`)}
       </div>
     </div>
   `, "foods");
-  document.querySelectorAll("[data-food-tab]").forEach(btn => btn.onclick = () => { state.foodTab = btn.dataset.foodTab; renderFoodLibrary(); });
-  document.getElementById("addCustomFood").onclick = () => renderCustomFoodForm("library");
-  document.querySelectorAll("[data-edit-food]").forEach(btn => btn.onclick = () => {
+
+  document.querySelectorAll("[data-food-tab]").forEach(btn => btn.onclick = () => {
+    btn.classList.add("selected-flash");
+    state.foodCategory = btn.dataset.foodTab;
+    if(state.foodCategory === "Add Food") renderCustomFoodForm("library");
+    else renderFoodLibrary();
+  });
+
+  const addBtn = document.getElementById("addCustomFood");
+  if(addBtn) addBtn.onclick = () => renderCustomFoodForm("library");
+
+  const search = document.getElementById("librarySearch");
+  if(search){
+    const box = document.getElementById("librarySearchResults");
+    search.oninput = () => {
+      const term = search.value.toLowerCase().trim();
+      const results = !term ? [] : state.foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term)).slice(0,30);
+      box.innerHTML = results.map(f => `
+        <div class="list-item">
+          <div>
+            <strong>${esc(f.name)}</strong>
+            <span class="small muted">${esc(f.usualPortion || f.portion)} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
+            <div class="confidence">${esc(f.source || "Food list")}</div>
+          </div>
+          <button class="btn secondary" data-edit-food="${esc(f.id || "")}">Edit</button>
+        </div>
+      `).join("") || (term ? `<p class="muted small">No result. Add this as a custom food.</p>` : "");
+      box.querySelectorAll("[data-edit-food]").forEach(btn => btn.onclick = () => {
+        const food = state.foods.find(f => f.id === btn.dataset.editFood);
+        if(food) renderEditFoodForm(food);
+      });
+    };
+  }
+
+  document.querySelectorAll("#libraryFoods [data-edit-food]").forEach(btn => btn.onclick = () => {
     const food = state.foods.find(f => f.id === btn.dataset.editFood);
     if(food) renderEditFoodForm(food);
   });
@@ -816,7 +971,7 @@ function renderCustomFoodForm(returnTo="library"){
       <h2>Add Family Food</h2>
       <p class="muted">Use this for meals Amara actually eats. These become easier to find next time.</p>
       <div class="field"><label>Food name</label><input id="customName" placeholder="Example: Mom's rice bowl" /></div>
-      <div class="field"><label>Category</label><select id="customCategory"><option>Meals</option><option>Rice, Bread & Grains</option><option>Snacks & Sweets</option><option>Fruits</option><option>Drinks</option><option>Hidden Carbs</option><option>Saved Foods</option></select></div>
+      <div class="field"><label>Category</label><select id="customCategory"><option>My Usual Foods</option><option>Meals</option><option>Rice / Bread / Pasta</option><option>Snacks & Sweets</option><option>Fruit</option><option>Drinks</option><option>Hidden Carbs</option></select></div>
       <div class="field"><label>Portion</label><input id="customPortion" placeholder="1 cup, 1 piece, 1 pack…" /></div>
       <div class="field"><label>Total carbs</label><input id="customCarbs" type="number" inputmode="numeric" placeholder="grams" /></div>
       <div class="field"><label>Calories</label><input id="customCalories" type="number" inputmode="numeric" placeholder="optional" /></div>
@@ -858,21 +1013,73 @@ function renderCustomFoodForm(returnTo="library"){
 }
 
 function renderHiddenCarbs(){
-  const secret = ["Sauce","Breading","Gravy","Ketchup","Sweet drink","Milk","Fruit","Dessert","Soup","Corn","Peas","Beans","Restaurant food","Sweet marinade","Flour-thickened sauce","Honey","Yogurt toppings","Juice","Noodles","Rice side","Potatoes","Bread on the side"];
+  const options = [
+    {name:"Sauce / gravy", small:5, usual:10, large:15},
+    {name:"Breading", small:5, usual:8, large:15},
+    {name:"Ketchup / sweet sauce", small:3, usual:5, large:10},
+    {name:"Honey / syrup", small:6, usual:17, large:34},
+    {name:"Sweet drink sip", small:5, usual:10, large:20}
+  ];
+
   layout(`
+    <div class="card dark">
+      <h2>Hidden Carbs</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Add only what might be hiding in the meal.</p>
+    </div>
     <div class="card">
-      <h2>Any secret carbs hiding here?</h2>
-      <p class="muted">Tap anything that might be part of the meal. This helps protect the estimate.</p>
+      <p class="muted small">If unsure, choose “I’m not sure” and ask an adult.</p>
     </div>
-    <div class="grid">
-      ${secret.map(s=>`<button class="action" data-secret="${s}"><strong>${s}</strong><span>Could add carbs.</span></button>`).join("")}
+    <div class="list">
+      ${options.map((o,i)=>`
+        <div class="card">
+          <h3>${esc(o.name)}</h3>
+          <div class="hidden-carb-grid">
+            <button class="btn secondary" data-hidden="${i}" data-size="small">A little<br><span>+${o.small}g</span></button>
+            <button class="btn secondary" data-hidden="${i}" data-size="usual">Some<br><span>+${o.usual}g</span></button>
+            <button class="btn secondary" data-hidden="${i}" data-size="large">A lot<br><span>+${o.large}g</span></button>
+          </div>
+        </div>
+      `).join("")}
     </div>
-    <button class="btn scarlet full" id="finishHidden">Done checking secret carbs</button>
+    <div class="grid single">
+      <button class="action" id="notSureHidden"><strong>I’m not sure</strong><span>Ask an adult before dosing.</span></button>
+      <button class="action scarlet" id="finishHidden"><strong>Done</strong><span>Show suggested Apidra.</span></button>
+    </div>
   `, "meal");
-  document.querySelectorAll("[data-secret]").forEach(btn => btn.onclick = () => { btn.classList.toggle("scarlet"); state.meal.hiddenChecked = true; });
-  document.getElementById("finishHidden").onclick = async () => { state.meal.hiddenChecked = true; await unlockBadge("hidden-carb-hunter");
+
+  document.querySelectorAll("[data-hidden]").forEach(btn => btn.onclick = async () => {
+    const restore = setBusy(btn, "Adding…");
+    const o = options[Number(btn.dataset.hidden)];
+    const size = btn.dataset.size;
+    const carbs = Number(o[size]);
+    state.meal.items.push({
+      name:o.name,
+      category:"Hidden Carbs",
+      portion:size === "small" ? "a little" : size === "large" ? "a lot" : "some",
+      carbs,
+      calories:0,
+      source:"Hidden carb estimate"
+    });
+    state.meal.hiddenChecked = true;
+    await unlockBadge("hidden-carb-hunter");
+    setTimeout(() => {
+      restore();
+      btn.classList.add("added");
+      toast(`Added ${carbs}g hidden carbs.`);
+    }, 150);
+  });
+
+  document.getElementById("notSureHidden").onclick = async () => {
+    await createAlert("hidden_carbs_unsure","orange","Amara was not sure about hidden carbs before eating.");
+    toast("Adult help note saved.");
+  };
+  document.getElementById("finishHidden").onclick = async () => {
+    const restore = setBusy(document.getElementById("finishHidden"), "Calculating…");
+    state.meal.hiddenChecked = true;
     await unlockBadge("plate-whisperer");
-    renderMealEstimate(); };
+    restore();
+    renderMealEstimate();
+  };
 }
 
 function roundDose(raw){ const unit = Number(state.settings.doseRounding || 1); return Math.round(raw / unit) * unit; }
@@ -909,7 +1116,15 @@ function renderMealEstimate(){
       <button class="action" id="injected"><strong>I already injected</strong><span>Log actual insulin and alert adults.</span></button>
     </div>
   `, "meal");
-  document.getElementById("adultConfirmed").onclick = () => saveMealLog({ adultConfirmed:true, actualDose:estimated });
+  document.getElementById("adultConfirmed").onclick = async () => {
+    const btn = document.getElementById("adultConfirmed");
+    const restore = setBusy(btn, "Saving meal…");
+    try{
+      await saveMealLog({ adultConfirmed:true, actualDose:estimated });
+    }finally{
+      restore();
+    }
+  };
   document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => { await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Suggested Apidra: ${estimated} units.`); await unlockBadge("caller-circle"); toast(`${b.dataset.call} alert saved.`); });
   document.getElementById("alone").onclick = async () => { await createAlert("alone","red",`Amara says she is alone during meal dosing. Suggested Apidra: ${estimated} units.`); toast("The Circle has been alerted."); };
   document.getElementById("injected").onclick = () => saveMealLog({ adultConfirmed:false, actualDose:estimated, alreadyInjected:true });
@@ -1311,6 +1526,140 @@ function showBadgeModal(id, onClose){
   document.getElementById("homeBadge").onclick = () => { div.remove(); state.view="home"; render(); };
 }
 
+
+async function deleteCollectionClient(colRef, batchSize=200){
+  let total = 0;
+  while(true){
+    const snap = await getDocs(query(colRef, limit(batchSize)));
+    if(snap.empty) break;
+    const batch = writeBatch(db);
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    total += snap.size;
+    if(snap.size < batchSize) break;
+  }
+  return total;
+}
+
+function renderDemoReset(){
+  $app.innerHTML = `
+    <div class="screen">
+      <div class="topbar">
+        <div class="logo-lockup">
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title"><strong>Reset Demo Data</strong><p class="small muted">Adult-only demo cleanup</p></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="build-tag">${BUILD}</span>
+          <button class="btn secondary" id="cancelResetTop">Cancel</button>
+        </div>
+      </div>
+
+      <div class="card danger">
+        <h2>Reset Demo Data</h2>
+        <p class="muted" style="margin-top:8px">This will erase demo logs and saved activity so you can test the app again from a clean state.</p>
+      </div>
+
+      <div class="card">
+        <h3>This will erase</h3>
+        <div class="list" style="margin-top:10px">
+          <div class="list-item"><div><strong>Meal, glucose, insulin, ketone, and symptom logs</strong><span class="small muted">All demo health logs</span></div></div>
+          <div class="list-item"><div><strong>Scarlet Entries and mood logs</strong><span class="small muted">Demo diary and mood records</span></div></div>
+          <div class="list-item"><div><strong>Badge unlocks and reports</strong><span class="small muted">Demo achievements and saved reports</span></div></div>
+          <div class="list-item"><div><strong>Alerts</strong><span class="small muted">Adult dashboard demo alerts</span></div></div>
+        </div>
+      </div>
+
+      <div class="card success">
+        <h3>This will keep</h3>
+        <p class="muted small">User accounts, roles, settings, and food library will be kept. This avoids breaking login or setup.</p>
+      </div>
+
+      <div class="card">
+        <div class="field">
+          <label>Type RESET to continue</label>
+          <input id="resetConfirm" placeholder="RESET" />
+        </div>
+        <button class="btn red full" id="confirmResetBtn">Reset Demo Logs</button>
+        <button class="btn secondary full" style="margin-top:10px" id="cancelResetBtn">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("cancelResetTop").onclick = () => renderAdult();
+  document.getElementById("cancelResetBtn").onclick = () => renderAdult();
+  document.getElementById("confirmResetBtn").onclick = async () => {
+    const text = document.getElementById("resetConfirm").value.trim();
+    if(text !== "RESET") return toast("Type RESET to confirm.");
+    const btn = document.getElementById("confirmResetBtn");
+    const restore = setBusy(btn, "Resetting demo data…");
+
+    try{
+      const childBase = collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs");
+      const childPath = (name) => collection(db,"families",FAMILY_ID,"children",CHILD_ID,name);
+
+      const counts = {};
+      counts.mealLogs = await deleteCollectionClient(childPath("mealLogs"));
+      counts.glucoseLogs = await deleteCollectionClient(childPath("glucoseLogs"));
+      counts.insulinLogs = await deleteCollectionClient(childPath("insulinLogs"));
+      counts.ketoneLogs = await deleteCollectionClient(childPath("ketoneLogs"));
+      counts.symptomLogs = await deleteCollectionClient(childPath("symptomLogs"));
+      counts.diaryEntries = await deleteCollectionClient(childPath("diaryEntries"));
+      counts.moodLogs = await deleteCollectionClient(childPath("moodLogs"));
+      counts.badgeUnlocks = await deleteCollectionClient(childPath("badgeUnlocks"));
+      counts.reports = await deleteCollectionClient(childPath("reports"));
+      counts.alerts = await deleteCollectionClient(collection(db,"families",FAMILY_ID,"alerts"));
+
+      state.unlockedBadges = new Set();
+
+      restore();
+      renderDemoResetDone(counts);
+    }catch(err){
+      console.error(err);
+      restore();
+      if(String(err.message || "").toLowerCase().includes("permission")){
+        toast("Reset blocked by Firestore rules. Publish the V2.1 rules.");
+      }else{
+        toast("Reset failed. Please try again.");
+      }
+    }
+  };
+}
+
+function renderDemoResetDone(counts){
+  const total = Object.values(counts || {}).reduce((a,b)=>a+Number(b||0),0);
+  $app.innerHTML = `
+    <div class="screen">
+      <div class="topbar">
+        <div class="logo-lockup">
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title"><strong>Demo Reset Complete</strong><p class="small muted">The Scarlet Diaries</p></div>
+        </div>
+        <span class="build-tag">${BUILD}</span>
+      </div>
+
+      <div class="card success">
+        <h2>Demo reset complete</h2>
+        <p class="muted" style="margin-top:8px">${total} demo record(s) were cleared.</p>
+      </div>
+
+      <div class="card">
+        <h3>Cleared records</h3>
+        <div class="list" style="margin-top:10px">
+          ${Object.entries(counts || {}).map(([k,v]) => `<div class="list-item"><div><strong>${esc(k)}</strong><span class="small muted">${Number(v || 0)} deleted</span></div></div>`).join("")}
+        </div>
+      </div>
+
+      <div class="grid single">
+        <button class="action scarlet" id="backAdultAfterReset"><strong>Back to Adult Dashboard</strong><span>Continue testing from a clean demo state.</span></button>
+        <button class="action" id="logoutAfterReset"><strong>Exit</strong><span>Return to login.</span></button>
+      </div>
+    </div>
+  `;
+  document.getElementById("backAdultAfterReset").onclick = () => renderAdult();
+  document.getElementById("logoutAfterReset").onclick = () => signOut(auth);
+}
+
 function renderAdult(){
   $app.innerHTML = `
     <div class="screen">
@@ -1336,6 +1685,11 @@ function renderAdult(){
         <h3>Reports</h3>
         <p class="muted small">7-day and 14-day summaries are now available from the Reports tab. Use them for checkups and pattern review.</p>
       </div>
+      <div class="card danger">
+        <h3>Demo Tools</h3>
+        <p class="muted small">For demo/testing only. This clears logs, diary entries, mood records, alerts, badges, and reports while keeping accounts and settings.</p>
+        <button class="btn red full" style="margin-top:12px" id="resetDemoBtn">Reset Demo Data</button>
+      </div>
       <div class="card">
         <h3>Notification Status</h3>
         <p class="muted small">Phase 6 adds Firebase alert records, adult acknowledgement, and backend email function files. Email sending activates after deploying the included Firebase Functions setup.</p>
@@ -1350,6 +1704,9 @@ function renderAdult(){
       </div>
     </div>`;
   bindGlobal();
+  const resetBtn = document.getElementById("resetDemoBtn");
+  if(resetBtn) resetBtn.onclick = () => renderDemoReset();
+
   const alertsRef = collection(db,"families",FAMILY_ID,"alerts");
   onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
     const list = document.getElementById("alertsList");

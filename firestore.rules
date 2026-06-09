@@ -70,7 +70,7 @@ service cloud.firestore {
       match /alerts/{alertId} {
         allow read, create: if sameFamily(familyId);
         allow update: if sameFamily(familyId);
-        allow delete: if false;
+        allow delete: if isAdult() && sameFamily(familyId);
       }
 
       match /children/{childId} {
@@ -86,44 +86,52 @@ service cloud.firestore {
 
         match /mealLogs/{logId} {
           allow read, create: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /glucoseLogs/{logId} {
           allow read, create: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /insulinLogs/{logId} {
           allow read, create: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /ketoneLogs/{logId} {
           allow read, create: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /symptomLogs/{logId} {
           allow read, create: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /diaryEntries/{entryId} {
           allow create: if sameFamily(familyId);
           allow read: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /moodLogs/{logId} {
           allow create: if sameFamily(familyId);
           allow read: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /badgeUnlocks/{badgeId} {
           allow read, create: if sameFamily(familyId);
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
         }
 
         match /reports/{reportId} {

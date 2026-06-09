@@ -1,30 +1,33 @@
-# The Scarlet Diaries — V2.0 Profile Repair Hotfix
+# The Scarlet Diaries — V2.2 Food UX Rebuild
 
-This build fixes the case where an email already exists in Firebase Authentication but has no matching Firestore user profile.
+This build focuses on the most important part of the app: Before I Eat and adding food.
 
-## What it fixes
+## What changed
 
-- Existing Auth user + missing `/users/{uid}` profile.
-- Login race condition where Firebase Auth state could sign the user out before profile validation finished.
-- Adds a **Profile Repair Needed** screen.
-- The repair screen shows:
-  - email
-  - selected role
-  - Create Scarlet Profile button
-- After repair, the user enters the app normally.
-- Keeps strict role validation once a profile exists.
-- Shows V2.0 in the app.
+- Removed the confusing Big Food Database UX.
+- Added `foods.json`, a clean app-ready starter food database.
+- Food selection is now tap-first, not typing-first.
+- Before I Eat is now:
+  1. Check sugar
+  2. Choose food group
+  3. Choose food
+  4. Choose portion
+  5. Add hidden carbs with portions
+  6. See suggested Apidra
+  7. Adult confirmed / save
+- Food cards have clear Choose buttons.
+- Portion choices: Small / Usual / Large / Custom.
+- Hidden carbs now have portions:
+  - A little
+  - Some
+  - A lot
+- Buttons now visibly press/move.
+- Add buttons show Adding… and Added feedback.
+- Adult Confirmed in Before I Eat is patched with Saving meal… feedback.
+- Food & Carb Library now uses the same simplified categories.
 
-## Important
+## Food source note
 
-Publish the included `firestore.rules` again after uploading this build.
+The included `foods.json` is a cleaned starter database designed for Amara’s UX. It is structured so USDA FoodData Central foods can be added later in the same format, but it is not the full raw USDA dataset inside the app.
 
-Firebase Console → Firestore Database → Rules → paste full `firestore.rules` → Publish.
-
-## How to use repair
-
-1. Choose the correct role.
-2. Enter the existing email/password.
-3. Tap Unlock the Diary.
-4. If the profile is missing, tap **Create Scarlet Profile**.
-5. Next time, use Unlock the Diary normally.
+USDA full downloads are too large and messy for child-facing search. The correct approach is to clean selected foods into `foods.json`.

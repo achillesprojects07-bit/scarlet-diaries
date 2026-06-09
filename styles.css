@@ -582,3 +582,104 @@ button:disabled{
   word-break:break-word;
   text-align:right;
 }
+
+
+/* V2.1 Demo Reset */
+.btn.red{
+  background:linear-gradient(135deg, #8b0000, #bd1e32);
+}
+.card.danger h3{
+  color:var(--ivory);
+}
+
+
+/* V2.2 Food UX rebuild */
+button{
+  transition:transform .12s ease, background .18s ease, border-color .18s ease, opacity .18s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+button.is-pressed,
+button:active{
+  transform:scale(.97);
+}
+button.added,
+.btn.added{
+  background:linear-gradient(135deg, #2f8f66, #226b4d) !important;
+  color:#fff !important;
+  border-color:rgba(47,143,102,.6) !important;
+}
+.selected-flash{
+  animation: selectedFlash .35s ease;
+}
+@keyframes selectedFlash{
+  0%{transform:scale(.97);box-shadow:0 0 0 rgba(192,57,43,0)}
+  50%{box-shadow:0 0 22px rgba(192,57,43,.45)}
+  100%{transform:scale(1);box-shadow:0 0 0 rgba(192,57,43,0)}
+}
+.food-category-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:9px;
+  margin:10px 0 14px;
+}
+.food-chip{
+  border:1px solid rgba(139,0,0,.28);
+  background:rgba(255,255,255,.05);
+  color:var(--tan);
+  border-radius:14px;
+  padding:12px 10px;
+  font-weight:900;
+  font-size:13px;
+  min-height:46px;
+}
+.food-chip.active{
+  background:linear-gradient(135deg,#8b0000,#c0392b);
+  color:#fff;
+  border-color:rgba(255,255,255,.12);
+}
+.food-card{
+  border-radius:16px;
+  background:rgba(255,255,255,.045);
+  border:1px solid rgba(139,0,0,.22);
+  padding:14px;
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:12px;
+  align-items:center;
+}
+.food-card strong{
+  display:block;
+  font-size:16px;
+}
+.food-results{
+  margin-top:10px;
+}
+.meal-summary-sticky{
+  position:sticky;
+  top:8px;
+  z-index:4;
+  background:rgba(19,11,15,.96);
+  backdrop-filter:blur(12px);
+}
+.meal-item{
+  border-color:rgba(47,143,102,.22);
+}
+.hidden-carb-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+  margin-top:12px;
+}
+.hidden-carb-grid .btn{
+  border-radius:13px;
+  padding:12px 8px;
+  line-height:1.2;
+  white-space:normal;
+}
+.hidden-carb-grid span{
+  color:var(--tan);
+  font-size:11px;
+}
+@media (min-width:430px){
+  .food-category-grid{grid-template-columns:1fr 1fr 1fr;}
+}
