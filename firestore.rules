@@ -30,7 +30,7 @@ service cloud.firestore {
       match /foodLibrary/{foodId} {
         allow read: if sameFamily(familyId);
         allow create: if sameFamily(familyId);
-        allow update, delete: if isAdult() && sameFamily(familyId);
+        allow update, delete: if sameFamily(familyId);
       }
 
       match /badges/{badgeId} {

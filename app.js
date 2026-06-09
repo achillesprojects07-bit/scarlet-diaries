@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.7";
+const BUILD = "V1.8";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -38,20 +38,20 @@ const DEFAULT_SETTINGS = {
 };
 
 const STARTER_FOODS = [
-  { name:"White rice", category:"Filipino", portion:"1 cup cooked", carbs:45, calories:205, source:"Family starter", confidence:"Medium", hidden:false },
-  { name:"Pandesal", category:"Filipino", portion:"1 piece", carbs:15, calories:120, source:"Estimate", confidence:"Low", hidden:false },
-  { name:"Filipino spaghetti", category:"Filipino", portion:"1 cup", carbs:43, calories:310, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Adobo sauce", category:"Filipino", portion:"2 tbsp", carbs:4, calories:35, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Fried chicken breading", category:"Hidden carbs", portion:"small serving", carbs:8, calories:60, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Sweet sauce / ketchup", category:"Hidden carbs", portion:"1 tbsp", carbs:5, calories:20, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Juice box", category:"Drinks", portion:"1 box", carbs:20, calories:90, source:"Label estimate", confidence:"Medium", hidden:false },
-  { name:"Milk", category:"Dairy", portion:"1 cup", carbs:12, calories:150, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Banana", category:"Fruit", portion:"1 medium", carbs:27, calories:105, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Pita bread", category:"Greek", portion:"1 medium", carbs:33, calories:170, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Greek yogurt plain", category:"Greek", portion:"170g", carbs:6, calories:100, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Honey", category:"Greek", portion:"1 tbsp", carbs:17, calories:64, source:"Generic", confidence:"Medium", hidden:true },
-  { name:"Spanakopita", category:"Greek", portion:"1 piece", carbs:28, calories:290, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Souvlaki with pita", category:"Greek", portion:"1 serving", carbs:38, calories:420, source:"Estimate", confidence:"Low", hidden:true }
+  { name:"White rice", category:"Rice, Bread & Grains", portion:"1 cup cooked", carbs:45, calories:205, source:"Family starter", confidence:"Medium", hidden:false },
+  { name:"Pandesal", category:"Rice, Bread & Grains", portion:"1 piece", carbs:15, calories:120, source:"Estimate", confidence:"Low", hidden:false },
+  { name:"Filipino spaghetti", category:"Meals", portion:"1 cup", carbs:43, calories:310, source:"Estimate", confidence:"Low", hidden:true },
+  { name:"Adobo sauce", category:"Meals", portion:"2 tbsp", carbs:4, calories:35, source:"Estimate", confidence:"Low", hidden:true },
+  { name:"Fried chicken breading", category:"Hidden Carbs", portion:"small serving", carbs:8, calories:60, source:"Estimate", confidence:"Low", hidden:true },
+  { name:"Sweet sauce / ketchup", category:"Hidden Carbs", portion:"1 tbsp", carbs:5, calories:20, source:"Estimate", confidence:"Low", hidden:true },
+  { name:"Juice box", category:"Drinks", favorite:true, portion:"1 box", carbs:20, calories:90, source:"Label estimate", confidence:"Medium", hidden:false },
+  { name:"Milk", category:"Drinks", portion:"1 cup", carbs:12, calories:150, source:"Generic", confidence:"Medium", hidden:false },
+  { name:"Banana", category:"Fruits", portion:"1 medium", carbs:27, calories:105, source:"Generic", confidence:"Medium", hidden:false },
+  { name:"Pita bread", category:"Rice, Bread & Grains", portion:"1 medium", carbs:33, calories:170, source:"Generic", confidence:"Medium", hidden:false },
+  { name:"Greek yogurt plain", category:"Meals", portion:"170g", carbs:6, calories:100, source:"Generic", confidence:"Medium", hidden:false },
+  { name:"Honey", category:"Meals", portion:"1 tbsp", carbs:17, calories:64, source:"Generic", confidence:"Medium", hidden:true },
+  { name:"Spanakopita", category:"Meals", portion:"1 piece", carbs:28, calories:290, source:"Estimate", confidence:"Low", hidden:true },
+  { name:"Souvlaki with pita", category:"Meals", portion:"1 serving", carbs:38, calories:420, source:"Estimate", confidence:"Low", hidden:true }
 ];
 
 const BADGES = [
@@ -88,7 +88,7 @@ let state = {
   foods: STARTER_FOODS,
   unlockedBadges: new Set(),
   view:"home",
-  foodTab:"family",
+  foodTab:"Favorites",
   meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" }
 };
 
@@ -105,6 +105,34 @@ function toast(msg){
   div.textContent = msg;
   document.body.appendChild(div);
   setTimeout(()=>div.remove(), 3000);
+}
+
+function setBusy(btn, text="Saving…"){
+  if(!btn) return () => {};
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = text;
+  return () => {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  };
+}
+
+function renderFlowDone({title="Saved", message="", next=[]} = {}){
+  layout(`
+    <div class="card success">
+      <h2>${esc(title)}</h2>
+      <p class="muted" style="margin-top:8px">${esc(message)}</p>
+    </div>
+    <div class="grid single">
+      ${next.map(n => `<button class="action ${n.className || ""}" data-next="${n.view}"><strong>${esc(n.title)}</strong><span>${esc(n.sub || "")}</span></button>`).join("")}
+      <button class="action scarlet" data-next="home"><strong>Back Home</strong><span>Return to Amara’s home screen.</span></button>
+    </div>
+  `, "home");
+  document.querySelectorAll("[data-next]").forEach(btn => btn.onclick = () => {
+    state.view = btn.dataset.next;
+    render();
+  });
 }
 
 function roleToStoredRole(role){
@@ -129,6 +157,7 @@ function render(){
     case "foods": return renderFoodLibrary();
     case "mood": return renderMoodMirror();
     case "reports": return renderReports();
+    case "pages": return renderScarletPages();
     default: return renderHome();
   }
 }
@@ -208,23 +237,71 @@ async function doLogin(create=false){
   const roleKey = state.selectedRole || "amara";
   const role = roleToStoredRole(roleKey);
   if(!email || !pass) return showError("Please enter your email and password.");
+
+  const btn = create ? document.getElementById("createBtn") : document.getElementById("loginBtn");
+  const originalText = btn ? btn.innerHTML : "";
   try{
+    if(btn){ btn.disabled = true; btn.innerHTML = create ? "Creating…" : "Unlocking…"; }
+    hideError();
+
     const cred = create
       ? await createUserWithEmailAndPassword(auth, email, pass)
       : await signInWithEmailAndPassword(auth, email, pass);
+
+    const userRef = doc(db,"users",cred.user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if(create){
+      if(userSnap.exists()){
+        const existing = userSnap.data();
+        if(existing.roleKey && existing.roleKey !== roleKey){
+          await signOut(auth);
+          return showError("This email is already assigned to a different profile.");
+        }
+      }
+      await setDoc(userRef, {
+        email,
+        role,
+        roleKey,
+        familyId:FAMILY_ID,
+        displayName: role === "child" ? "Amara" : roleKey,
+        active:true,
+        createdAt:serverTimestamp(),
+        updatedAt:serverTimestamp()
+      }, { merge:true });
+      await ensureDefaults();
+    }else{
+      if(!userSnap.exists()){
+        await signOut(auth);
+        return showError("This account has no Scarlet profile yet. Please create the correct account first.");
+      }
+      const profile = userSnap.data();
+      if(profile.roleKey !== roleKey || profile.role !== role){
+        await signOut(auth);
+        return showError("This account is not assigned to this profile. Please choose the correct profile.");
+      }
+      if(profile.active === false){
+        await signOut(auth);
+        return showError("This account is not active. Please ask an adult to check it.");
+      }
+    }
+
+    sessionStorage.setItem("scarletJustLoggedIn","yes");
+    state.user = cred.user;
     state.role = role;
     localStorage.setItem("scarletRole", role);
     localStorage.setItem("scarletRoleKey", roleKey);
-    await setDoc(doc(db,"users",cred.user.uid), {
-      email, role, roleKey, familyId:FAMILY_ID, displayName: role === "child" ? "Amara" : roleKey,
-      active:true, updatedAt:serverTimestamp()
-    }, { merge:true });
-    await ensureDefaults();
+    await loadData();
+    render();
   }catch(err){
     console.error(err);
     if(err.code === "auth/invalid-email") showError("Please enter a valid email address.");
+    else if(err.code === "auth/email-already-in-use") showError("This email already has an account. Use Unlock the Diary instead.");
+    else if(err.code === "auth/weak-password") showError("Please use a stronger password.");
     else if(err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") showError("Incorrect email or password. Try again.");
     else showError(err.message || "Something went wrong. Please try again.");
+  }finally{
+    if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
   }
 }
 
@@ -232,13 +309,21 @@ async function ensureDefaults(){
   const settingsRef = doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current");
   const snap = await getDoc(settingsRef);
   if(!snap.exists()) await setDoc(settingsRef, { ...DEFAULT_SETTINGS, updatedAt: serverTimestamp() });
-  for(const food of STARTER_FOODS){
-    const foodId = food.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
-    await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",foodId), {
-      ...food, familyId:FAMILY_ID, verified: food.source === "Family starter", active:true, updatedAt: serverTimestamp()
-    }, { merge:true });
+
+  const foodCheck = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), limit(1)));
+  if(foodCheck.empty){
+    for(const food of STARTER_FOODS){
+      const foodId = food.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+      await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",foodId), {
+        ...food, familyId:FAMILY_ID, verified: food.source === "Family starter", favorite: !!food.favorite, active:true, updatedAt: serverTimestamp()
+      }, { merge:true });
+    }
   }
-  for(const badge of BADGES) await setDoc(doc(db,"families",FAMILY_ID,"badges",badge.id), badge, { merge:true });
+
+  const badgeCheck = await getDocs(query(collection(db,"families",FAMILY_ID,"badges"), limit(1)));
+  if(badgeCheck.empty){
+    for(const badge of BADGES) await setDoc(doc(db,"families",FAMILY_ID,"badges",badge.id), badge, { merge:true });
+  }
 }
 
 async function loadData(){
@@ -299,13 +384,14 @@ function renderHome(){
       <p class="muted small">This app gives an estimate from the saved family plan. It must never be treated as an order to inject. If unsure, call the Circle.</p>
     </div>
     <div class="grid">
-      <button class="action scarlet" data-go="meal"><strong>I’m Eating</strong><span>Check sugar, count carbs, estimate safely.</span></button>
+      <button class="action scarlet" data-go="meal"><strong>Before I Eat</strong><span>Check sugar, choose food, then see a suggested dose.</span></button>
       <button class="action" data-go="high"><strong>My Sugar Is High</strong><span>Slow down, check safety, alert the Circle.</span></button>
       <button class="action" data-go="low"><strong>My Sugar Is Low</strong><span>No insulin now. Protect yourself first.</span></button>
       <button class="action" data-go="insulin"><strong>I Took Insulin</strong><span>Log Apidra or Lantus.</span></button>
       <button class="action" data-go="feel"><strong>I Don’t Feel Well</strong><span>Tell the diary what your body feels.</span></button>
-      <button class="action" data-go="foods"><strong>Food & Carb Library</strong><span>Family foods, Filipino, Greek, and database search.</span></button>
+      <button class="action" data-go="foods"><strong>Food & Carb Library</strong><span>Favorites, saved foods, packaged foods, and the big food database.</span></button>
       <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Give your feelings a place to go.</span></button>
+      <button class="action plum" data-go="pages"><strong>My Scarlet Pages</strong><span>Reread the words that prove you kept going.</span></button>
       <button class="action plum" data-go="vault"><strong>Open The Scarlet Vault</strong><span>Proof that you kept going.</span></button>
       <button class="action" data-go="mood"><strong>Mood Mirror</strong><span>See feelings without shame.</span></button>
       <button class="action" data-go="reports"><strong>Reports</strong><span>7-day and 14-day summaries for adults and doctors.</span></button>
@@ -319,7 +405,7 @@ function renderMealStart(){
   state.meal = { type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" };
   layout(`
     <div class="card">
-      <h2>I’m Eating</h2>
+      <h2>Before I Eat</h2>
       <p class="muted">First, choose what you’re having.</p>
     </div>
     <div class="grid">
@@ -406,9 +492,8 @@ function renderFoodBuilder(){
     <div class="card">
       <h2>Add Food</h2>
       <p class="muted">Family verified foods appear first. Database search is available for packaged food names.</p>
-      <div class="food-source-tabs">
-        <button class="tab-btn ${state.foodTab==="family"?"active":""}" data-tab="family">Family/Favorites</button>
-        <button class="tab-btn ${state.foodTab==="database"?"active":""}" data-tab="database">Database Search</button>
+      <div class="food-source-tabs wide-tabs">
+        ${["Favorites","Saved Foods","Meals","Rice, Bread & Grains","Snacks & Sweets","Fruits","Drinks","Hidden Carbs","Packaged Foods","Big Food Database"].map(t => `<button class="tab-btn ${state.foodTab===t ? "active":""}" data-tab="${t}">${t}</button>`).join("")}
       </div>
       <div class="field">
         <label>Search food</label>
@@ -432,7 +517,13 @@ function renderFoodBuilder(){
 
   async function draw(){
     const term = input.value.toLowerCase().trim();
-    if(state.foodTab === "database" && term.length >= 3){
+
+    if(state.foodTab === "Big Food Database"){
+      results.innerHTML = `<p class="muted small">The large USDA FoodData Central search needs an API key setup before it can search live. Use Packaged Foods for label foods, or add a custom family food.</p>`;
+      return;
+    }
+
+    if(state.foodTab === "Packaged Foods" && term.length >= 3){
       results.innerHTML = `<p class="muted small">Searching packaged food database…</p>`;
       const dbFoods = await searchOpenFoodFacts(term);
       if(!dbFoods.length){
@@ -440,16 +531,28 @@ function renderFoodBuilder(){
         return;
       }
       results.innerHTML = dbFoods.map((f,i)=>foodButtonHtml(f,i)).join("");
-      results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => { state.meal.items.push(dbFoods[Number(btn.dataset.food)]); renderFoodBuilder(); });
+      results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => {
+        state.meal.items.push(dbFoods[Number(btn.dataset.food)]);
+        toast("Food added.");
+        renderFoodBuilder();
+      });
       return;
     }
 
-    const foods = state.foods
-      .filter(f => !term || `${f.name} ${f.category}`.toLowerCase().includes(term))
-      .sort((a,b) => Number(!!b.verified) - Number(!!a.verified))
-      .slice(0,10);
-    results.innerHTML = foods.map((f,i)=>foodButtonHtml(f,i)).join("") || `<p class="muted small">No food found. Add custom family food.</p>`;
-    results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => { state.meal.items.push(foods[Number(btn.dataset.food)]); renderFoodBuilder(); });
+    let foods = state.foods.slice();
+    if(state.foodTab === "Favorites") foods = foods.filter(f => f.favorite || f.verified);
+    else if(state.foodTab === "Saved Foods") foods = foods.filter(f => f.verified || f.source === "Family Verified" || f.source === "Family starter");
+    else if(state.foodTab !== "Packaged Foods") foods = foods.filter(f => f.category === state.foodTab);
+
+    if(term) foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
+
+    foods = foods.sort((a,b) => Number(!!b.favorite) - Number(!!a.favorite) || Number(!!b.verified) - Number(!!a.verified)).slice(0,12);
+    results.innerHTML = foods.map((f,i)=>foodButtonHtml(f,i)).join("") || `<p class="muted small">No food found here. Try another category or add custom family food.</p>`;
+    results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => {
+      state.meal.items.push(foods[Number(btn.dataset.food)]);
+      toast("Food added.");
+      renderFoodBuilder();
+    });
   }
   input.oninput = draw; draw();
 
@@ -459,11 +562,14 @@ function renderFoodBuilder(){
 }
 
 function foodButtonHtml(f,i){
-  return `<button class="action" data-food="${i}">
-    <strong>${esc(f.name)}</strong>
-    <span>${esc(f.portion || "serving")} · ${Number(f.carbs||0)}g carbs · ${esc(f.calories || 0)} kcal</span>
-    <span class="confidence">${esc(foodConfidence(f))}</span>
-  </button>`;
+  return `<div class="list-item">
+    <div>
+      <strong>${esc(f.name)}</strong>
+      <span class="small muted">${esc(f.portion || "serving")} · ${Number(f.carbs||0)}g carbs · ${esc(f.calories || 0)} kcal</span>
+      <div class="confidence">${esc(foodConfidence(f))}</div>
+    </div>
+    <button class="btn scarlet" data-food="${i}">Add</button>
+  </div>`;
 }
 
 async function searchOpenFoodFacts(term){
@@ -495,29 +601,87 @@ async function searchOpenFoodFacts(term){
 }
 
 function renderFoodLibrary(){
+  const categories = ["Favorites","Saved Foods","Meals","Rice, Bread & Grains","Snacks & Sweets","Fruits","Drinks","Hidden Carbs","Packaged Foods","Big Food Database"];
+  const active = state.foodTab || "Favorites";
+  let foods = state.foods.slice();
+  if(active === "Favorites") foods = foods.filter(f => f.favorite || f.verified);
+  else if(active === "Saved Foods") foods = foods.filter(f => f.verified || f.source === "Family Verified" || f.source === "Family starter");
+  else if(active === "Big Food Database") foods = [];
+  else if(active === "Packaged Foods") foods = [];
+  else foods = foods.filter(f => f.category === active);
+
   layout(`
     <div class="card dark">
       <h2>Food & Carb Library</h2>
-      <p class="tagline">Family foods first. Database second.</p>
-      <p class="muted small" style="margin-top:8px">Insulin is calculated from total carbs. Calories are shown only for nutrition context.</p>
+      <p class="tagline">Find carbs before insulin is estimated.</p>
+      <p class="muted small" style="margin-top:8px">Filipino and Greek should be tags, not main categories. Categories follow how Amara actually eats.</p>
     </div>
     <div class="card">
+      <div class="food-source-tabs wide-tabs">
+        ${categories.map(t => `<button class="tab-btn ${active===t ? "active":""}" data-food-tab="${t}">${t}</button>`).join("")}
+      </div>
       <button class="btn scarlet full" id="addCustomFood">Add custom family food</button>
       <div class="divider-line"></div>
+      ${active === "Big Food Database" ? `<p class="muted small">USDA FoodData Central needs API-key setup before live search can be enabled. This will be connected in the database integration build.</p>` : ""}
+      ${active === "Packaged Foods" ? `<p class="muted small">Packaged food search appears inside Before I Eat. Search by food name after choosing Packaged Foods.</p>` : ""}
       <div class="list">
-        ${state.foods.slice().sort((a,b)=>Number(!!b.verified)-Number(!!a.verified)).slice(0,40).map(f => `
+        ${foods.slice().sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite)||Number(!!b.verified)-Number(!!a.verified)).slice(0,60).map(f => `
           <div class="list-item">
             <div>
               <strong>${esc(f.name)}</strong>
               <span class="small muted">${esc(f.category)} · ${esc(f.portion)} · ${Number(f.carbs||0)}g carbs</span>
               <div class="confidence">${esc(foodConfidence(f))}</div>
             </div>
+            <button class="btn secondary" data-edit-food="${esc(f.id || "")}">Edit</button>
           </div>
-        `).join("")}
+        `).join("") || (active === "Big Food Database" || active === "Packaged Foods" ? "" : `<p class="muted small">No foods in this category yet.</p>`)}
       </div>
     </div>
   `, "foods");
+  document.querySelectorAll("[data-food-tab]").forEach(btn => btn.onclick = () => { state.foodTab = btn.dataset.foodTab; renderFoodLibrary(); });
   document.getElementById("addCustomFood").onclick = () => renderCustomFoodForm("library");
+  document.querySelectorAll("[data-edit-food]").forEach(btn => btn.onclick = () => {
+    const food = state.foods.find(f => f.id === btn.dataset.editFood);
+    if(food) renderEditFoodForm(food);
+  });
+}
+
+function renderEditFoodForm(food){
+  layout(`
+    <div class="card">
+      <h2>Edit Food</h2>
+      <p class="muted">Adjust the carb count, portion, or category if the family learns a better estimate.</p>
+      <div class="field"><label>Food name</label><input id="editName" value="${esc(food.name || "")}" /></div>
+      <div class="field"><label>Category</label><select id="editCategory">${["Favorites","Saved Foods","Meals","Rice, Bread & Grains","Snacks & Sweets","Fruits","Drinks","Hidden Carbs","Packaged Foods"].map(c => `<option ${food.category===c ? "selected":""}>${c}</option>`).join("")}</select></div>
+      <div class="field"><label>Portion</label><input id="editPortion" value="${esc(food.portion || "")}" /></div>
+      <div class="field"><label>Carbs</label><input id="editCarbs" type="number" inputmode="numeric" value="${Number(food.carbs||0)}" /></div>
+      <div class="field"><label>Calories</label><input id="editCalories" type="number" inputmode="numeric" value="${Number(food.calories||0)}" /></div>
+      <div class="field"><label>Tags</label><input id="editTags" value="${esc(food.tags || "")}" placeholder="Home, School, Greek, Filipino, Favorite…" /></div>
+      <div class="field"><label>Favorite?</label><select id="editFavorite"><option value="false">No</option><option value="true" ${food.favorite ? "selected":""}>Yes</option></select></div>
+      <button class="btn scarlet full" id="saveFoodEdit">Save changes</button>
+      <button class="btn secondary full" id="cancelFoodEdit">Cancel</button>
+    </div>
+  `, "foods");
+  document.getElementById("cancelFoodEdit").onclick = () => renderFoodLibrary();
+  document.getElementById("saveFoodEdit").onclick = async () => {
+    const restore = setBusy(document.getElementById("saveFoodEdit"), "Saving changes…");
+    const updates = {
+      name: document.getElementById("editName").value.trim(),
+      category: document.getElementById("editCategory").value,
+      portion: document.getElementById("editPortion").value.trim(),
+      carbs: Number(document.getElementById("editCarbs").value),
+      calories: Number(document.getElementById("editCalories").value || 0),
+      tags: document.getElementById("editTags").value.trim(),
+      favorite: document.getElementById("editFavorite").value === "true",
+      updatedAt: serverTimestamp()
+    };
+    if(!updates.name || isNaN(updates.carbs)){ restore(); return toast("Food name and carbs are required."); }
+    await updateDoc(doc(db,"families",FAMILY_ID,"foodLibrary",food.id), updates);
+    Object.assign(food, updates);
+    restore();
+    toast("Food saved.");
+    renderFoodLibrary();
+  };
 }
 
 function renderCustomFoodForm(returnTo="library"){
@@ -526,7 +690,7 @@ function renderCustomFoodForm(returnTo="library"){
       <h2>Add Family Food</h2>
       <p class="muted">Use this for meals Amara actually eats. These become easier to find next time.</p>
       <div class="field"><label>Food name</label><input id="customName" placeholder="Example: Mom's rice bowl" /></div>
-      <div class="field"><label>Category</label><input id="customCategory" placeholder="Filipino, Greek, School snack…" /></div>
+      <div class="field"><label>Category</label><select id="customCategory"><option>Meals</option><option>Rice, Bread & Grains</option><option>Snacks & Sweets</option><option>Fruits</option><option>Drinks</option><option>Hidden Carbs</option><option>Saved Foods</option></select></div>
       <div class="field"><label>Portion</label><input id="customPortion" placeholder="1 cup, 1 piece, 1 pack…" /></div>
       <div class="field"><label>Total carbs</label><input id="customCarbs" type="number" inputmode="numeric" placeholder="grams" /></div>
       <div class="field"><label>Calories</label><input id="customCalories" type="number" inputmode="numeric" placeholder="optional" /></div>
@@ -538,7 +702,7 @@ function renderCustomFoodForm(returnTo="library"){
   document.getElementById("saveCustomFood").onclick = async () => {
     const f = {
       name: document.getElementById("customName").value.trim(),
-      category: document.getElementById("customCategory").value.trim() || "Family",
+      category: document.getElementById("customCategory").value || "Saved Foods",
       portion: document.getElementById("customPortion").value.trim() || "1 serving",
       carbs: Number(document.getElementById("customCarbs").value),
       calories: Number(document.getElementById("customCalories").value || 0),
@@ -551,8 +715,10 @@ function renderCustomFoodForm(returnTo="library"){
       updatedAt: serverTimestamp()
     };
     if(!f.name || isNaN(f.carbs)) return toast("Please enter food name and carbs.");
+    const restore = setBusy(document.getElementById("saveCustomFood"), "Adding food…");
     const id = f.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now().toString().slice(-5);
     await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",id), f);
+    restore();
     state.foods.unshift({ id, ...f });
     await unlockBadge("family-food-keeper");
     toast("Family food saved.");
@@ -598,7 +764,7 @@ function renderMealEstimate(){
   layout(`
     <div class="card dark">
       <p class="pill">Estimated dose, not a command</p>
-      <h2 style="margin-top:10px">Estimated Apidra: ${estimated} units</h2>
+      <h2 style="margin-top:10px">Suggested Apidra: ${estimated} units</h2>
       <p class="tagline" style="text-align:left;margin-top:6px">Show this to your Circle before injecting.</p>
     </div>
     <div class="card">
@@ -618,8 +784,8 @@ function renderMealEstimate(){
     </div>
   `, "meal");
   document.getElementById("adultConfirmed").onclick = () => saveMealLog({ adultConfirmed:true, actualDose:estimated });
-  document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => { await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Estimated Apidra: ${estimated} units.`); await unlockBadge("caller-circle"); toast(`${b.dataset.call} alert saved.`); });
-  document.getElementById("alone").onclick = async () => { await createAlert("alone","red",`Amara says she is alone during meal dosing. Estimated Apidra: ${estimated} units.`); toast("The Circle has been alerted."); };
+  document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => { await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Suggested Apidra: ${estimated} units.`); await unlockBadge("caller-circle"); toast(`${b.dataset.call} alert saved.`); });
+  document.getElementById("alone").onclick = async () => { await createAlert("alone","red",`Amara says she is alone during meal dosing. Suggested Apidra: ${estimated} units.`); toast("The Circle has been alerted."); };
   document.getElementById("injected").onclick = () => saveMealLog({ adultConfirmed:false, actualDose:estimated, alreadyInjected:true });
 }
 
@@ -647,7 +813,16 @@ async function saveMealLog(extra={}){
   await unlockBadge("scarlet-sentinel");
   await unlockBadge("feast-reader");
   if(extra.alreadyInjected) await createAlert("already_injected","orange",`Amara logged that she already injected ${estimatedDose} units Apidra.`);
-  showBadgeModal("feast-reader", () => { state.view="home"; render(); });
+  toast("Meal and suggested insulin saved.");
+  renderFlowDone({
+    title:"Meal saved",
+    message:"Your food, carbs, glucose, and suggested Apidra estimate were saved. Confirm with an adult before injecting.",
+    next:[
+      {view:"insulin",title:"Log Insulin",sub:"Use this after adult confirmation."},
+      {view:"pages",title:"My Scarlet Pages",sub:"Reread your entries."},
+      {view:"vault",title:"Open The Scarlet Vault",sub:"See your courage badges."}
+    ]
+  });
 }
 
 function renderHighSugar(){
@@ -689,17 +864,30 @@ function renderHighSugarSafety(){
     </div>
   `, "home");
   document.getElementById("saveHigh").onclick = async () => {
+    const btn = document.getElementById("saveHigh");
+    const restore = setBusy(btn, "Saving high sugar check…");
     const last = document.getElementById("lastApidra").value;
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), {
       glucose:g, context:"high_sugar", lastApidra:last, ketones:state.meal.ketones || null,
       alertLevel:g>=state.settings.urgentHighThreshold ? "red":"orange", createdAt:serverTimestamp(), enteredBy:state.user.uid
     });
+    const correction = getCorrection(g);
     if(last === "yes"){
       await unlockBadge("no-stack-oath");
       await createAlert("stacking_risk","red",`Amara logged high glucose ${g} and Apidra within last ${state.settings.insulinStackingHours} hours. Possible stacking risk.`);
     }
     await unlockBadge(g>=300 ? "slayer-300" : "stormbreaker");
-    showBadgeModal(g>=300 ? "slayer-300" : "stormbreaker", () => { state.view="home"; render(); });
+    restore();
+    toast("High sugar check saved.");
+    renderFlowDone({
+      title:"High sugar check saved",
+      message:`Suggested correction from saved family plan: ${correction} unit(s). Confirm with an adult before injecting. Drink water and do not stack insulin.`,
+      next:[
+        {view:"circle",title:"Call My Circle",sub:"Tell Mom, Dad, or Tita."},
+        {view:"insulin",title:"Log Insulin",sub:"Only after adult confirmation."},
+        {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
+      ]
+    });
   };
 }
 
@@ -715,12 +903,24 @@ function renderLowSugar(preset=null){
     </div>
   `, "home");
   document.getElementById("saveLow").onclick = async () => {
+    const btn = document.getElementById("saveLow");
+    const restore = setBusy(btn, "Saving low sugar check…");
     const g = Number(document.getElementById("lowGlucose").value);
     const action = document.getElementById("lowAction").value;
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), { glucose:g, context:"low_sugar", action, alertLevel:"red", createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await createAlert("low","red",`Amara logged low glucose ${g}. Action: ${action}.`);
     await unlockBadge("crimson-comeback");
-    showBadgeModal("crimson-comeback", () => { state.view="home"; render(); });
+    restore();
+    toast("Low sugar check saved.");
+    renderFlowDone({
+      title:"Low sugar check saved",
+      message:"No insulin while low. Take fast sugar based on the family plan, tell an adult, and recheck.",
+      next:[
+        {view:"circle",title:"Call My Circle",sub:"Ask an adult to help."},
+        {view:"low",title:"Recheck Low Sugar",sub:"Log the next reading."},
+        {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
+      ]
+    });
   };
 }
 
@@ -743,7 +943,14 @@ function renderInsulinLog(){
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), { insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     if(type === "Apidra" && reason === "Correction") await createAlert("correction_logged","orange",`Amara logged correction insulin: ${dose} units Apidra.`);
     toast("Insulin log saved.");
-    state.view="home"; render();
+    renderFlowDone({
+      title:"Insulin log saved",
+      message:"The insulin dose was saved in Amara’s record.",
+      next:[
+        {view:"reports",title:"Reports",sub:"See summaries later."},
+        {view:"diary",title:"Write a Scarlet Entry",sub:"Say how today felt."}
+      ]
+    });
   };
 }
 
@@ -765,16 +972,28 @@ function renderSymptoms(){
     selected.has(b.dataset.symptom) ? selected.delete(b.dataset.symptom) : selected.add(b.dataset.symptom);
   });
   document.getElementById("saveSymptoms").onclick = async () => {
+    const btn = document.getElementById("saveSymptoms");
+    const restore = setBusy(btn, "Saving symptoms…");
     const arr = [...selected];
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"), { symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.user.uid });
-    if(arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x))) { await unlockBadge("dark-signal-reader"); await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`); }
-    toast("Symptom log saved.");
-    state.view="home"; render();
+    const severe = arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x));
+    if(severe) { await unlockBadge("dark-signal-reader"); await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`); }
+    restore();
+    toast("Symptoms saved.");
+    renderFlowDone({
+      title:"Symptoms saved",
+      message: severe ? "These symptoms need adult attention. Your Circle has been alerted." : "Your symptoms were saved. Next, check glucose or tell your Circle if you still feel unwell.",
+      next:[
+        {view:"high",title:"Check High Sugar",sub:"Use this if glucose is high."},
+        {view:"low",title:"Check Low Sugar",sub:"Use this if glucose is low."},
+        {view:"circle",title:"Call My Circle",sub:"Tell Mom, Dad, or Tita."}
+      ]
+    });
   };
 }
 
 function renderDiary(){
-  const moods = ["Brave","Tired","Angry","Sad","Okay","Proud","Scared","Confused","Strong","Lonely","Annoyed","Hopeful"];
+  const moods = ["Brave","Tired","Angry","Sad","Okay","Proud","Scared","Confused","Strong","Lonely","Annoyed","Hopeful","Something only I can name"];
   const prompts = [
     "Today my body felt…",
     "One brave thing I did today was…",
@@ -782,7 +1001,8 @@ function renderDiary(){
     "I wish adults understood…",
     "My sugar number did not define me because…",
     "Today I was unstoppable when…",
-    "If my body could speak, it would say…"
+    "If my body could speak, it would say…",
+    "I want to write this my own way…"
   ];
   layout(`
     <div class="card dark">
@@ -790,7 +1010,7 @@ function renderDiary(){
       <p class="tagline" style="text-align:left;margin-top:6px">Give your feelings a place to go.</p>
     </div>
     <div class="card">
-      <div class="field"><label>Today I feel…</label><select id="mood">${moods.map(m=>`<option>${m}</option>`).join("")}</select></div>
+      <div class="field"><label>Today I feel…</label><select id="mood">${moods.map(m=>`<option>${m}</option>`).join("")}</select></div><div class="field" id="customMoodWrap" style="display:none"><label>Name the feeling your own way</label><input id="customMood" placeholder="Only if the list does not have the right word" /></div>
       <div class="field"><label>Prompt</label><select id="prompt">${prompts.map(p=>`<option>${p}</option>`).join("")}</select></div>
       <div class="field"><label>Scarlet Entry</label><textarea id="entry" placeholder="Today my body felt…"></textarea></div>
       <div class="field"><label>Privacy</label><select id="privacy"><option value="private">Private to Amara</option><option value="circle">Share with my Circle</option><option value="safety">Safety note</option></select></div>
@@ -798,18 +1018,23 @@ function renderDiary(){
     </div>
   `, "diary");
   document.getElementById("prompt").onchange = e => document.getElementById("entry").placeholder = e.target.value;
+  document.getElementById("mood").onchange = e => { document.getElementById("customMoodWrap").style.display = e.target.value === "Something only I can name" ? "flex" : "none"; };
   document.getElementById("saveEntry").onclick = async () => {
-    const mood = document.getElementById("mood").value;
+    let mood = document.getElementById("mood").value;
+    if(mood === "Something only I can name") mood = document.getElementById("customMood").value.trim() || mood;
     const prompt = document.getElementById("prompt").value;
     const entry = document.getElementById("entry").value.trim();
     const privacy = document.getElementById("privacy").value;
     if(!entry) return toast("Write a few words first.");
+    const doneBusy = setBusy(document.getElementById("saveEntry"), "Saving entry…");
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), { mood, prompt, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), { mood, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await unlockBadge("brave-page");
     if(["Sad","Angry","Scared","Lonely"].includes(mood)) { await unlockBadge("girl-who-stayed"); await unlockBadge("soft-monster-tamer"); }
     if(mood === "Sad" || mood === "Lonely") await unlockBadge("moonlit-heart");
-    showBadgeModal(["Sad","Angry","Scared","Lonely"].includes(mood) ? "girl-who-stayed" : "brave-page", () => { state.view="vault"; render(); });
+    doneBusy();
+    toast("Entry saved.");
+    renderFlowDone({ title:"Scarlet Entry saved", message:"Your words are now in My Scarlet Pages.", next:[{view:"pages",title:"Read My Scarlet Pages",sub:"Open your diary archive."},{view:"vault",title:"Open The Scarlet Vault",sub:"See your courage badges."}] });
   };
 }
 
@@ -880,10 +1105,21 @@ function renderCircle(){
     </div>
   `, "home");
   document.querySelectorAll("[data-person]").forEach(btn => btn.onclick = async () => {
-    await createAlert("circle_call","orange",`Amara asked for ${btn.dataset.person}.`);
+    const who = btn.dataset.person;
+    const restore = setBusy(btn, "Sending alert…");
+    await createAlert("circle_call","orange",`Amara asked for ${who}.`);
     await unlockBadge("caller-circle");
     await unlockBadge("signal-flame");
-    showBadgeModal("caller-circle", () => { state.view="home"; render(); });
+    restore();
+    toast("Alert saved.");
+    renderFlowDone({
+      title:`${who} alert saved`,
+      message:"Your Circle has been alerted in the adult dashboard.",
+      next:[
+        {view:"high",title:"Log Glucose",sub:"Use this if sugar is high."},
+        {view:"diary",title:"Write a Scarlet Entry",sub:"Say what you need to say."}
+      ]
+    });
   });
 }
 
@@ -940,184 +1176,13 @@ function showBadgeModal(id, onClose){
       <h2>${esc(b.name)}</h2>
       <p class="tagline" style="text-align:left;margin-top:8px">${esc(b.desc)}</p>
       <p class="muted small" style="margin-top:10px">${esc(b.rule)}</p>
-      <button class="btn scarlet full" style="margin-top:18px" id="closeBadge">Keep going</button>
+      <button class="btn scarlet full" style="margin-top:18px" id="closeBadge">Continue</button>
+      <button class="btn secondary full" style="margin-top:10px" id="homeBadge">Back Home</button>
     </div>`;
   document.body.appendChild(div);
-  document.getElementById("closeBadge").onclick = () => { div.remove(); onClose?.(); };
-}
-
-
-async function fetchChildCollection(name, days=14){
-  const snap = await getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,name), orderBy("createdAt","desc"), limit(250)));
-  const now = Date.now();
-  const cutoff = now - days * 24 * 60 * 60 * 1000;
-  return snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(x => {
-    const t = x.createdAt?.toMillis ? x.createdAt.toMillis() : now;
-    return t >= cutoff;
-  });
-}
-
-function average(nums){
-  const arr = nums.filter(n => typeof n === "number" && !isNaN(n));
-  if(!arr.length) return null;
-  return Math.round(arr.reduce((a,b)=>a+b,0)/arr.length);
-}
-
-function downloadText(filename, text){
-  const blob = new Blob([text], { type:"text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function reportToText(days, data){
-  const lines = [];
-  lines.push(`The Scarlet Diaries ${days}-Day Report`);
-  lines.push(`Child: Amara`);
-  lines.push(`Generated: ${new Date().toLocaleString()}`);
-  lines.push(``);
-  lines.push(`Glucose`);
-  lines.push(`- Readings logged: ${data.glucoseCount}`);
-  lines.push(`- Average glucose: ${data.avgGlucose ?? "Not enough data"} mg/dL`);
-  lines.push(`- Low readings < ${state.settings.lowThreshold}: ${data.lowCount}`);
-  lines.push(`- High readings >= ${state.settings.highThreshold}: ${data.highCount}`);
-  lines.push(`- Urgent high readings >= ${state.settings.urgentHighThreshold}: ${data.urgentHighCount}`);
-  lines.push(``);
-  lines.push(`Meals and insulin`);
-  lines.push(`- Meals logged: ${data.mealCount}`);
-  lines.push(`- Total carbs logged: ${data.totalCarbs}g`);
-  lines.push(`- Average carbs per meal: ${data.avgCarbs ?? "Not enough data"}g`);
-  lines.push(`- Insulin logs: ${data.insulinCount}`);
-  lines.push(`- Estimated Apidra total from meal logs: ${data.estimatedDoseTotal} units`);
-  lines.push(``);
-  lines.push(`Ketones and symptoms`);
-  lines.push(`- Ketone logs: ${data.ketoneCount}`);
-  lines.push(`- No strips logged: ${data.noStripsCount}`);
-  lines.push(`- Moderate/large ketones: ${data.moderateLargeKetones}`);
-  lines.push(`- Symptom logs: ${data.symptomCount}`);
-  lines.push(``);
-  lines.push(`Diary and mood`);
-  lines.push(`- Scarlet Entries: ${data.diaryCount}`);
-  lines.push(`- Mood logs: ${data.moodCount}`);
-  lines.push(`- Hard feelings logged: ${data.hardMoodCount}`);
-  lines.push(``);
-  lines.push(`Care notes`);
-  lines.push(`- Alerts created: ${data.alertCount}`);
-  lines.push(`- Alerts acknowledged: ${data.ackCount}`);
-  lines.push(``);
-  lines.push(`Important: This report is a family log summary, not medical advice. Share with a qualified diabetes clinician.`);
-  return lines.join("\\n");
-}
-
-async function buildReport(days){
-  const [mealLogs, glucoseLogs, insulinLogs, ketoneLogs, symptomLogs, diaryEntries, moodLogs] = await Promise.all([
-    fetchChildCollection("mealLogs", days),
-    fetchChildCollection("glucoseLogs", days),
-    fetchChildCollection("insulinLogs", days),
-    fetchChildCollection("ketoneLogs", days),
-    fetchChildCollection("symptomLogs", days),
-    fetchChildCollection("diaryEntries", days),
-    fetchChildCollection("moodLogs", days)
-  ]);
-
-  const alertsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"alerts"), orderBy("createdAt","desc"), limit(250)));
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  const alerts = alertsSnap.docs.map(d => ({ id:d.id, ...d.data() })).filter(x => {
-    const t = x.createdAt?.toMillis ? x.createdAt.toMillis() : Date.now();
-    return t >= cutoff;
-  });
-
-  const glucoseFromMeals = mealLogs.map(x => Number(x.glucoseBeforeMeal)).filter(n => !isNaN(n));
-  const glucoseDirect = glucoseLogs.map(x => Number(x.glucose)).filter(n => !isNaN(n));
-  const allGlucose = [...glucoseFromMeals, ...glucoseDirect];
-
-  const carbs = mealLogs.map(x => Number(x.totalCarbs || 0));
-  const estimatedDoses = mealLogs.map(x => Number(x.estimatedDose || 0));
-
-  return {
-    days,
-    glucoseCount: allGlucose.length,
-    avgGlucose: average(allGlucose),
-    lowCount: allGlucose.filter(g => g < state.settings.lowThreshold).length,
-    highCount: allGlucose.filter(g => g >= state.settings.highThreshold).length,
-    urgentHighCount: allGlucose.filter(g => g >= state.settings.urgentHighThreshold).length,
-    mealCount: mealLogs.length,
-    totalCarbs: carbs.reduce((a,b)=>a+b,0),
-    avgCarbs: average(carbs),
-    insulinCount: insulinLogs.length,
-    estimatedDoseTotal: Math.round(estimatedDoses.reduce((a,b)=>a+b,0) * 10) / 10,
-    ketoneCount: ketoneLogs.length,
-    noStripsCount: ketoneLogs.filter(k => String(k.ketoneResult || "").toLowerCase().includes("no strips")).length,
-    moderateLargeKetones: ketoneLogs.filter(k => String(k.ketoneResult || "").toLowerCase().includes("moderate")).length,
-    symptomCount: symptomLogs.length,
-    diaryCount: diaryEntries.length,
-    moodCount: moodLogs.length,
-    hardMoodCount: moodLogs.filter(m => ["Sad","Angry","Scared","Lonely"].includes(m.mood)).length,
-    alertCount: alerts.length,
-    ackCount: alerts.filter(a => a.acknowledged).length
-  };
-}
-
-function reportCardsHtml(data){
-  return `
-    <div class="grid">
-      <div class="card"><h3>Glucose</h3><div class="kv"><span>Logs</span><strong>${data.glucoseCount}</strong></div><div class="kv"><span>Average</span><strong>${data.avgGlucose ?? "—"}</strong></div><div class="kv"><span>Lows</span><strong>${data.lowCount}</strong></div><div class="kv"><span>Highs</span><strong>${data.highCount}</strong></div></div>
-      <div class="card"><h3>Meals</h3><div class="kv"><span>Meals</span><strong>${data.mealCount}</strong></div><div class="kv"><span>Carbs</span><strong>${data.totalCarbs}g</strong></div><div class="kv"><span>Avg carbs</span><strong>${data.avgCarbs ?? "—"}</strong></div><div class="kv"><span>Est. Apidra</span><strong>${data.estimatedDoseTotal}u</strong></div></div>
-      <div class="card"><h3>Safety</h3><div class="kv"><span>Ketones</span><strong>${data.ketoneCount}</strong></div><div class="kv"><span>No strips</span><strong>${data.noStripsCount}</strong></div><div class="kv"><span>Symptoms</span><strong>${data.symptomCount}</strong></div><div class="kv"><span>Alerts</span><strong>${data.alertCount}</strong></div></div>
-      <div class="card"><h3>Heart</h3><div class="kv"><span>Entries</span><strong>${data.diaryCount}</strong></div><div class="kv"><span>Moods</span><strong>${data.moodCount}</strong></div><div class="kv"><span>Hard feelings</span><strong>${data.hardMoodCount}</strong></div><div class="kv"><span>Acknowledged</span><strong>${data.ackCount}</strong></div></div>
-    </div>
-  `;
-}
-
-async function renderReports(days=7){
-  layout(`
-    <div class="card dark">
-      <h2>Reports</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">For patterns, checkups, and better adult support.</p>
-    </div>
-    <div class="card">
-      <p class="muted small">Choose a report window. This is a family log summary, not medical advice.</p>
-      <div class="btn-row" style="margin-top:12px">
-        <button class="btn ${days===7 ? "scarlet":"secondary"}" id="report7">7 days</button>
-        <button class="btn ${days===14 ? "scarlet":"secondary"}" id="report14">14 days</button>
-      </div>
-    </div>
-    <div id="reportBody" class="card"><p class="muted small">Building report…</p></div>
-  `, "reports");
-
-  document.getElementById("report7").onclick = () => renderReports(7);
-  document.getElementById("report14").onclick = () => renderReports(14);
-
-  const data = await buildReport(days);
-  const body = document.getElementById("reportBody");
-  body.className = "";
-  body.innerHTML = `
-    ${reportCardsHtml(data)}
-    <div class="card">
-      <h3>${days}-Day Summary</h3>
-      <p class="muted small">Use this to discuss patterns with a qualified diabetes clinician.</p>
-      <div class="divider-line"></div>
-      <button class="btn scarlet full" id="downloadReport">Download text report</button>
-      <button class="btn secondary full" style="margin-top:10px" id="saveReport">Save report snapshot</button>
-    </div>
-  `;
-  document.getElementById("downloadReport").onclick = () => {
-    downloadText(`scarlet-diaries-${days}-day-report.txt`, reportToText(days, data));
-  };
-  document.getElementById("saveReport").onclick = async () => {
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"reports"), {
-      days,
-      data,
-      createdAt:serverTimestamp(),
-      createdBy:state.user?.uid || null
-    });
-    toast("Report snapshot saved.");
-  };
+  const close = () => { div.remove(); onClose?.(); };
+  document.getElementById("closeBadge").onclick = close;
+  document.getElementById("homeBadge").onclick = () => { div.remove(); state.view="home"; render(); };
 }
 
 function renderAdult(){
@@ -1192,10 +1257,16 @@ function renderAdult(){
 }
 
 onAuthStateChanged(auth, async user => {
-  state.user = user;
-  if(user){
+  const justLoggedIn = sessionStorage.getItem("scarletJustLoggedIn") === "yes";
+  if(user && justLoggedIn){
+    state.user = user;
     state.role = localStorage.getItem("scarletRole") || "child";
     await loadData();
+    render();
+  }else{
+    if(user) await signOut(auth);
+    state.user = null;
+    state.role = null;
+    renderLogin();
   }
-  render();
 });

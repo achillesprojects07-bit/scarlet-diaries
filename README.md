@@ -1,41 +1,32 @@
-# The Scarlet Diaries — V1.7
+# The Scarlet Diaries — V1.8 Correction Build
 
-Phase 7 build: Reports + Doctor Review.
+This build addresses the logged testing comments.
 
-## Phase 7 added
+## Login fixes
+- App no longer auto-opens straight to Amara on reload.
+- Role validation added: an email must match its assigned roleKey/role.
+- Wrong role selection is blocked.
+- Login flow optimized to avoid repeatedly seeding starter data.
 
-- Reports tab
-- 7-day report
-- 14-day report
-- Glucose summary
-- Meal and carb summary
-- Estimated Apidra summary
-- Ketone and symptom summary
-- Mood / Scarlet Entry summary
-- Alert and acknowledgement summary
-- Downloadable text report
-- Save report snapshot to Firestore
-- Firestore rules updated for saved reports
+## Flow fixes
+- Home button wording changed from “I’m Eating” to “Before I Eat.”
+- High sugar flow now gives next steps and suggested correction from the saved family plan.
+- Low sugar flow now gives next steps and no-insulin guidance.
+- Symptoms flow now gives next steps after saving.
+- Call My Circle flow now shows a clear finish screen.
+- Badge modal has Continue and Back Home to prevent freezing.
+- Save/add status messages added: Saving…, Saved, Adding…, Alert saved.
 
-## Included from previous phases
+## Meal and food fixes
+- Before I Eat computes suggested Apidra from glucose + food carbs + correction.
+- Food results now have explicit Add buttons.
+- Food database categories changed to:
+  Favorites, Saved Foods, Meals, Rice/Bread/Grains, Snacks/Sweets, Fruits, Drinks, Hidden Carbs, Packaged Foods, Big Food Database.
+- Filipino and Greek are no longer main categories; they should be tags.
+- Food database has Edit buttons.
+- Food edit allows name, category, portion, carbs, calories, tags, favorite.
 
-- Dark vampire-style login
-- Role selection: Amara / Mom / Dad / Tita
-- Unlock the Diary
-- Small Create account
-- Meal Mode
-- High and Low Safety Modes
-- Ketone prompt
-- Secret carbs checklist
-- Food & Carb Library
-- Open Food Facts packaged food search
-- Custom family foods
-- Scarlet Entry
-- Mood Mirror
-- Scarlet Vault
-- Alert records and adult acknowledgement
-- Firebase Functions email sender template
-
-## Important
-
-Reports are summaries for family and clinician review. They are not medical advice.
+## Diary fixes
+- Scarlet Entry has “Something only I can name” for feelings.
+- Prompt includes “I want to write this my own way…”
+- My Scarlet Pages added for rereading saved entries.
