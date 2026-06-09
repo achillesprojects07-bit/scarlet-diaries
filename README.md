@@ -1,38 +1,30 @@
-# The Scarlet Diaries — V1.9 Firestore/Login Hotfix
+# The Scarlet Diaries — V2.0 Profile Repair Hotfix
 
-This is a Firebase/Auth/Firestore hotfix.
+This build fixes the case where an email already exists in Firebase Authentication but has no matching Firestore user profile.
 
-## Fixes
+## What it fixes
 
-- Corrected Firestore rules for first-time user profile creation.
-- A signed-in user can now create/read only their own `/users/{uid}` profile.
-- Role validation remains strict:
-  - Amara email can only enter Amara
-  - Mom email can only enter Mom
-  - Dad email can only enter Dad
-  - Tita email can only enter Tita
-- Login no longer depends on family starter-data seeding succeeding.
-- If starter food/badge setup is blocked, the app still opens using built-in starter foods.
-- Better error message for permissions issue.
-- Added note: “Already created? Use Unlock the Diary above.”
-- V1.9 shown in the app.
+- Existing Auth user + missing `/users/{uid}` profile.
+- Login race condition where Firebase Auth state could sign the user out before profile validation finished.
+- Adds a **Profile Repair Needed** screen.
+- The repair screen shows:
+  - email
+  - selected role
+  - Create Scarlet Profile button
+- After repair, the user enters the app normally.
+- Keeps strict role validation once a profile exists.
+- Shows V2.0 in the app.
 
-## Very important setup step
+## Important
 
-After uploading this build to GitHub, you must also publish the included `firestore.rules` in Firebase Console:
+Publish the included `firestore.rules` again after uploading this build.
 
-Firebase Console → Firestore Database → Rules → paste `firestore.rules` → Publish
+Firebase Console → Firestore Database → Rules → paste full `firestore.rules` → Publish.
 
-Without publishing the V1.9 rules, Create account and Unlock the Diary can still show:
-“Missing or insufficient permissions.”
+## How to use repair
 
-## Recommended account setup
-
-Create one account per profile:
-
-- Amara account, selected as Amara
-- Mom account, selected as Mom
-- Dad account, selected as Dad
-- Tita account, selected as Tita
-
-Do not use the same email for every role.
+1. Choose the correct role.
+2. Enter the existing email/password.
+3. Tap Unlock the Diary.
+4. If the profile is missing, tap **Create Scarlet Profile**.
+5. Next time, use Unlock the Diary normally.

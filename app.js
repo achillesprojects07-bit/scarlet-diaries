@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.9";
+const BUILD = "V2.0";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -84,6 +84,8 @@ let state = {
   user:null,
   role:null,
   selectedRole:"",
+  loginInProgress:false,
+  pendingRepair:null,
   settings: DEFAULT_SETTINGS,
   foods: STARTER_FOODS,
   unlockedBadges: new Set(),
@@ -231,6 +233,94 @@ function hideError(){
   if(el) el.classList.remove("visible");
 }
 
+
+function renderProfileRepair(){
+  const repair = state.pendingRepair;
+  if(!repair){
+    renderLogin();
+    return;
+  }
+
+  const roleName = ({ amara:"Amara", mom:"Mom", dad:"Dad", tita:"Tita" })[repair.roleKey] || repair.roleKey;
+
+  $app.innerHTML = `
+    <section class="screen center">
+      <div class="app-wrapper">
+        <div class="header">
+          <div class="scarlet-drop"></div>
+          <div class="app-title">The Scarlet <span>Diaries</span></div>
+          <div class="divider"></div>
+          <div class="tagline">Every drop. Every breath. Unstoppable.</div>
+          <div class="build-tag">${BUILD}</div>
+        </div>
+
+        <div class="login-card">
+          <div class="form-title">Profile Repair Needed</div>
+          <p class="muted small" style="text-align:center;line-height:1.5">
+            This email can sign in, but it does not yet have a Scarlet profile.
+          </p>
+          <div class="card" style="box-shadow:none">
+            <div class="kv"><span>Email</span><strong>${esc(repair.email)}</strong></div>
+            <div class="kv"><span>Create profile as</span><strong>${esc(roleName)}</strong></div>
+          </div>
+          <button class="submit-btn" id="repairBtn">Create Scarlet Profile</button>
+          <button class="back-btn" id="repairCancel">Cancel and choose another role</button>
+        </div>
+
+        <div class="footer">The Scarlet Diaries · Private &amp; Protected</div>
+      </div>
+    </section>
+  `;
+
+  document.getElementById("repairCancel").onclick = async () => {
+    state.pendingRepair = null;
+    state.loginInProgress = false;
+    sessionStorage.removeItem("scarletJustLoggedIn");
+    await signOut(auth);
+    renderLogin();
+  };
+
+  document.getElementById("repairBtn").onclick = async () => {
+    const btn = document.getElementById("repairBtn");
+    const restore = setBusy(btn, "Creating profile…");
+    try{
+      const { user, email, role, roleKey } = state.pendingRepair;
+      await setDoc(doc(db,"users",user.uid), {
+        email,
+        role,
+        roleKey,
+        familyId:FAMILY_ID,
+        displayName: role === "child" ? "Amara" : roleKey,
+        active:true,
+        repairedAt:serverTimestamp(),
+        updatedAt:serverTimestamp()
+      }, { merge:true });
+
+      toast("Scarlet profile created.");
+      sessionStorage.setItem("scarletJustLoggedIn","yes");
+      state.user = user;
+      state.role = role;
+      state.pendingRepair = null;
+      state.loginInProgress = false;
+      localStorage.setItem("scarletRole", role);
+      localStorage.setItem("scarletRoleKey", roleKey);
+
+      await safeEnsureDefaults();
+      await loadData();
+      render();
+    }catch(err){
+      console.error(err);
+      if(String(err.message || "").toLowerCase().includes("permission")){
+        toast("Profile repair blocked. Please publish the V2.0 firestore.rules file.");
+      }else{
+        toast("Could not repair profile yet. Please try again.");
+      }
+    }finally{
+      restore();
+    }
+  };
+}
+
 async function doLogin(create=false){
   const email = document.getElementById("emailInput").value.trim();
   const pass = document.getElementById("passwordInput").value;
@@ -242,6 +332,7 @@ async function doLogin(create=false){
   const originalText = btn ? btn.innerHTML : "";
 
   try{
+    state.loginInProgress = true;
     if(btn){ btn.disabled = true; btn.innerHTML = create ? "Creating account…" : "Unlocking…"; }
     hideError();
 
@@ -269,24 +360,36 @@ async function doLogin(create=false){
     }
 
     if(!userSnap.exists()){
-      await signOut(auth);
-      return showError("Account created in Firebase Auth, but no Scarlet profile exists yet. Please tap Create account for the correct role.");
+      // Existing Firebase Auth account, but missing Firestore profile.
+      // Keep the user signed in and ask permission to create the selected profile.
+      state.pendingRepair = {
+        user: cred.user,
+        email,
+        role,
+        roleKey
+      };
+      if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
+      renderProfileRepair();
+      return;
     }
 
     const profile = userSnap.data();
     if(profile.roleKey !== roleKey || profile.role !== role){
       await signOut(auth);
+      state.loginInProgress = false;
       return showError("This account is not assigned to this profile. Please choose the correct profile.");
     }
 
     if(profile.active === false){
       await signOut(auth);
+      state.loginInProgress = false;
       return showError("This account is not active. Please ask an adult to check it.");
     }
 
     sessionStorage.setItem("scarletJustLoggedIn","yes");
     state.user = cred.user;
     state.role = role;
+    state.loginInProgress = false;
     localStorage.setItem("scarletRole", role);
     localStorage.setItem("scarletRoleKey", roleKey);
 
@@ -296,14 +399,15 @@ async function doLogin(create=false){
 
   }catch(err){
     console.error(err);
+    state.loginInProgress = false;
     if(err.code === "auth/invalid-email") showError("Please enter a valid email address.");
     else if(err.code === "auth/email-already-in-use") showError("This email already has an account. Use Unlock the Diary instead.");
     else if(err.code === "auth/weak-password") showError("Please use a stronger password.");
     else if(err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") showError("Incorrect email or password. Try again.");
-    else if(String(err.message || "").toLowerCase().includes("permission")) showError("Firebase permissions blocked setup. Please publish the V1.9 firestore.rules file, then try again.");
+    else if(String(err.message || "").toLowerCase().includes("permission")) showError("Firebase permissions blocked setup. Please publish the V2.0 firestore.rules file, then try again.");
     else showError(err.message || "Something went wrong. Please try again.");
   }finally{
-    if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
+    if(!state.pendingRepair && btn){ btn.disabled = false; btn.innerHTML = originalText; }
   }
 }
 
@@ -1280,6 +1384,12 @@ function renderAdult(){
 
 onAuthStateChanged(auth, async user => {
   const justLoggedIn = sessionStorage.getItem("scarletJustLoggedIn") === "yes";
+
+  // Avoid race condition while signInWithEmailAndPassword is still finishing.
+  if(state.loginInProgress || state.pendingRepair){
+    return;
+  }
+
   if(user && justLoggedIn){
     state.user = user;
     state.role = localStorage.getItem("scarletRole") || "child";

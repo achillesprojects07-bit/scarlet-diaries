@@ -572,3 +572,13 @@ button:disabled{
 .error-msg{
   line-height:1.35;
 }
+
+
+/* V2.0 Profile Repair Hotfix */
+.login-card .card{
+  margin:4px 0;
+}
+.login-card .kv strong{
+  word-break:break-word;
+  text-align:right;
+}
