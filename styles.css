@@ -511,3 +511,22 @@ label{font-weight:900;color:var(--ivory)}
   .app-title{font-size:24px}
   h1{font-size:27px}
 }
+
+
+/* V1.6 Phase 5 + 6 upgrades */
+.badge-card:not(.locked){
+  border-color:rgba(192,57,43,.38);
+  box-shadow:0 0 24px rgba(139,0,0,.16), 0 10px 24px rgba(0,0,0,.18);
+}
+.badge-card:not(.locked)::after{
+  content:"";
+  position:absolute;
+  inset:auto 12px 12px auto;
+  width:38px;
+  height:38px;
+  border-radius:50%;
+  background:radial-gradient(circle, rgba(192,57,43,.26), transparent 70%);
+}
+.list-item[data-alert="critical"], .danger{
+  box-shadow:0 0 28px rgba(189,30,50,.18);
+}

@@ -5,7 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, collection, addDoc, setDoc, doc, getDoc, getDocs, query,
-  where, orderBy, limit, serverTimestamp, onSnapshot
+  where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 import { firebaseConfig } from "./firebase-config.js";
@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.5";
+const BUILD = "V1.6";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -69,7 +69,15 @@ const BADGES = [
   { id:"caller-circle", section:"The Circle", name:"Caller of the Circle", desc:"You were brave enough to call your guardians.", rule:"Ask Mom, Dad, or Tita for help." },
   { id:"brave-page", section:"The Written Heart", name:"The Brave Page", desc:"You gave your feelings a place to go.", rule:"Write a Scarlet Entry." },
   { id:"girl-who-stayed", section:"The Written Heart", name:"The Girl Who Stayed", desc:"Even on a hard day, you remained.", rule:"Write after choosing sad, angry, or scared." },
-  { id:"seven-scarlet-days", section:"The Unstoppable Line", name:"Seven Scarlet Days", desc:"Seven days. Seven proofs that you kept going.", rule:"Use the app for 7 days." }
+  { id:"seven-scarlet-days", section:"The Unstoppable Line", name:"Seven Scarlet Days", desc:"Seven days. Seven proofs that you kept going.", rule:"Use the app for 7 days." },
+  { id:"three-guardians", section:"The Circle", name:"The Three Guardians", desc:"Your Circle has been summoned.", rule:"Alert the Circle during a high-risk moment." },
+  { id:"signal-flame", section:"The Circle", name:"The Signal Flame", desc:"Your call for help became a light in the dark.", rule:"Send any safety alert." },
+  { id:"scarlet-crown", section:"The Unstoppable Line", name:"The Crimson Crown", desc:"A mark for every brave thing you kept doing.", rule:"Reach a major care milestone." },
+  { id:"wall-proof", section:"The Unstoppable Line", name:"The Wall of Proof", desc:"The proof was never perfection. It was staying.", rule:"Unlock several courage badges." },
+  { id:"soft-monster-tamer", section:"The Written Heart", name:"The Soft Monster Tamer", desc:"You named the feeling, so it became less alone.", rule:"Write about a hard feeling." },
+  { id:"moonlit-heart", section:"The Written Heart", name:"The Moonlit Heart", desc:"Even sadness can be held gently.", rule:"Write a Scarlet Entry on a sad day." },
+  { id:"plate-whisperer", section:"Secrets of the Plate", name:"The Plate Whisperer", desc:"You listened to the meal before it surprised you.", rule:"Build a full meal with food and hidden carb check." },
+  { id:"dark-signal-reader", section:"The Dark Signals", name:"The Dark Signal Reader", desc:"You noticed the warning signs before they became louder.", rule:"Log ketones or symptoms during a high sugar moment." }
 ];
 
 let state = {
@@ -363,7 +371,7 @@ function renderKetonePrompt(next="meal"){
     state.meal.ketones = btn.dataset.ketone;
     await addKetoneLog(g, btn.dataset.ketone);
     if(btn.dataset.ketone === "No strips") await unlockBadge("truth-keeper");
-    if(btn.dataset.ketone.includes("checked")) await unlockBadge("ketone-seer");
+    if(btn.dataset.ketone.includes("checked")) { await unlockBadge("ketone-seer"); await unlockBadge("dark-signal-reader"); }
     if(g >= state.settings.urgentHighThreshold) await createAlert("urgent_high", "red", `Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
     else await createAlert("high", "orange", `Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
     if(btn.dataset.ketone === "Moderate / large") return renderEmergency("Moderate or large ketones need adult help now.");
@@ -567,7 +575,9 @@ function renderHiddenCarbs(){
     <button class="btn scarlet full" id="finishHidden">Done checking secret carbs</button>
   `, "meal");
   document.querySelectorAll("[data-secret]").forEach(btn => btn.onclick = () => { btn.classList.toggle("scarlet"); state.meal.hiddenChecked = true; });
-  document.getElementById("finishHidden").onclick = async () => { state.meal.hiddenChecked = true; await unlockBadge("hidden-carb-hunter"); renderMealEstimate(); };
+  document.getElementById("finishHidden").onclick = async () => { state.meal.hiddenChecked = true; await unlockBadge("hidden-carb-hunter");
+    await unlockBadge("plate-whisperer");
+    renderMealEstimate(); };
 }
 
 function roundDose(raw){ const unit = Number(state.settings.doseRounding || 1); return Math.round(raw / unit) * unit; }
@@ -754,7 +764,7 @@ function renderSymptoms(){
   document.getElementById("saveSymptoms").onclick = async () => {
     const arr = [...selected];
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"), { symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.user.uid });
-    if(arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x))) await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`);
+    if(arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x))) { await unlockBadge("dark-signal-reader"); await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`); }
     toast("Symptom log saved.");
     state.view="home"; render();
   };
@@ -794,7 +804,8 @@ function renderDiary(){
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), { mood, prompt, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), { mood, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await unlockBadge("brave-page");
-    if(["Sad","Angry","Scared","Lonely"].includes(mood)) await unlockBadge("girl-who-stayed");
+    if(["Sad","Angry","Scared","Lonely"].includes(mood)) { await unlockBadge("girl-who-stayed"); await unlockBadge("soft-monster-tamer"); }
+    if(mood === "Sad" || mood === "Lonely") await unlockBadge("moonlit-heart");
     showBadgeModal(["Sad","Angry","Scared","Lonely"].includes(mood) ? "girl-who-stayed" : "brave-page", () => { state.view="vault"; render(); });
   };
 }
@@ -831,6 +842,9 @@ function renderVault(){
     <div class="card">
       <h3>The Wall of Proof</h3>
       <p class="muted small">Amara is still here. Amara is learning. Amara is unstoppable.</p>
+      <div class="divider-line"></div>
+      <p class="small muted">Unlocked courage marks: <strong>${state.unlockedBadges.size}</strong></p>
+      <p class="small muted" style="margin-top:6px">A high is not a failure. A low is not a defeat. Every honest log is a brave page.</p>
     </div>
     ${Object.entries(grouped).map(([section,badges]) => `
       <div class="card">
@@ -865,6 +879,7 @@ function renderCircle(){
   document.querySelectorAll("[data-person]").forEach(btn => btn.onclick = async () => {
     await createAlert("circle_call","orange",`Amara asked for ${btn.dataset.person}.`);
     await unlockBadge("caller-circle");
+    await unlockBadge("signal-flame");
     showBadgeModal("caller-circle", () => { state.view="home"; render(); });
   });
 }
@@ -889,7 +904,19 @@ async function addKetoneLog(glucose, ketoneResult){
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), { glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid, alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange" });
 }
 async function createAlert(type, severity, message){
-  await addDoc(collection(db,"families",FAMILY_ID,"alerts"), { childId:CHILD_ID, type, severity, message, recipients: state.settings.alertEmails || [], acknowledged:false, createdAt:serverTimestamp(), enteredBy: state.user?.uid || null });
+  await addDoc(collection(db,"families",FAMILY_ID,"alerts"), {
+    childId:CHILD_ID,
+    type,
+    severity,
+    message,
+    recipients: state.settings.alertEmails || [],
+    acknowledged:false,
+    emailStatus:"pending_function_setup",
+    createdAt:serverTimestamp(),
+    enteredBy: state.user?.uid || null
+  });
+  await unlockBadge("signal-flame");
+  if(severity === "red" || severity === "critical") await unlockBadge("three-guardians");
 }
 async function unlockBadge(id){
   if(state.unlockedBadges.has(id)) return;
@@ -938,6 +965,10 @@ function renderAdult(){
         <div id="alertsList" class="list"><p class="muted small">Loading alerts…</p></div>
       </div>
       <div class="card">
+        <h3>Notification Status</h3>
+        <p class="muted small">Phase 6 adds Firebase alert records, adult acknowledgement, and backend email function files. Email sending activates after deploying the included Firebase Functions setup.</p>
+      </div>
+      <div class="card">
         <h3>Settings</h3>
         <div class="kv"><span>Carb ratio</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
         <div class="kv"><span>Dose rounding</span><strong>Nearest ${state.settings.doseRounding} unit</strong></div>
@@ -954,11 +985,28 @@ function renderAdult(){
     if(snap.empty){ list.innerHTML = `<p class="muted small">No alerts yet.</p>`; return; }
     list.innerHTML = snap.docs.map(d => {
       const a = d.data();
+      const acknowledged = !!a.acknowledged;
       return `<div class="list-item">
-        <div><strong>${esc(a.severity || "alert").toUpperCase()}</strong><span class="small muted">${esc(a.message)}</span></div>
-        <span class="pill">${esc(a.type)}</span>
+        <div>
+          <strong>${esc(a.severity || "alert").toUpperCase()}</strong>
+          <span class="small muted">${esc(a.message)}</span>
+          <div class="confidence">${acknowledged ? "Acknowledged" : "Needs adult check"}</div>
+          <div class="confidence">${esc(a.emailStatus || "stored in Firebase")}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <span class="pill">${esc(a.type)}</span>
+          ${acknowledged ? "" : `<button class="btn secondary" data-ack="${d.id}">I saw this</button>`}
+        </div>
       </div>`;
     }).join("");
+    list.querySelectorAll("[data-ack]").forEach(btn => btn.onclick = async () => {
+      await updateDoc(doc(db,"families",FAMILY_ID,"alerts",btn.dataset.ack), {
+        acknowledged:true,
+        acknowledgedAt:serverTimestamp(),
+        acknowledgedBy:state.user?.uid || null
+      });
+      toast("Alert acknowledged.");
+    });
   });
 }
 
