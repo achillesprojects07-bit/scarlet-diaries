@@ -1,33 +1,34 @@
-# The Scarlet Diaries — V2.2 Food UX Rebuild
+# The Scarlet Diaries — V2.3 300 Food Database Build
 
-This build focuses on the most important part of the app: Before I Eat and adding food.
+This build expands the food database and cleans up the Before I Eat flow.
 
-## What changed
+## Added
 
-- Removed the confusing Big Food Database UX.
-- Added `foods.json`, a clean app-ready starter food database.
-- Food selection is now tap-first, not typing-first.
-- Before I Eat is now:
-  1. Check sugar
-  2. Choose food group
-  3. Choose food
-  4. Choose portion
-  5. Add hidden carbs with portions
-  6. See suggested Apidra
-  7. Adult confirmed / save
-- Food cards have clear Choose buttons.
-- Portion choices: Small / Usual / Large / Custom.
-- Hidden carbs now have portions:
-  - A little
-  - Some
-  - A lot
-- Buttons now visibly press/move.
-- Add buttons show Adding… and Added feedback.
-- Adult Confirmed in Before I Eat is patched with Saving meal… feedback.
-- Food & Carb Library now uses the same simplified categories.
+- `foods.json` now has **300 food and drink items**
+- Amara’s favorites are prioritized:
+  - Breakfast Favorites
+  - Meal Favorites
+- Added **All** category
+- Search is now always visible in Before I Eat
+- Search works by first letter or word:
+  - `r`
+  - `rice`
+  - `pit`
+  - `milk`
+- Portions are now measurable instead of vague Small/Usual/Large:
+  - 1/4 cup
+  - 1/2 cup
+  - 1 cup
+  - 1 tablespoon
+  - 1 teaspoon
+  - 1 slice
+  - 1 piece
+  - 1 pack
+  - 1 bottle
+- Hidden carbs no longer appears as the main top action when the meal is empty
+- Hidden carbs appears after food is added
+- Continue button replaces “Next: Hidden Carbs”
 
 ## Food source note
 
-The included `foods.json` is a cleaned starter database designed for Amara’s UX. It is structured so USDA FoodData Central foods can be added later in the same format, but it is not the full raw USDA dataset inside the app.
-
-USDA full downloads are too large and messy for child-facing search. The correct approach is to clean selected foods into `foods.json`.
+This is a curated app-ready starter database. It is not a raw full USDA dump because the full dataset is too large and not child-friendly without cleaning.

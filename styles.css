@@ -683,3 +683,21 @@ button.added,
 @media (min-width:430px){
   .food-category-grid{grid-template-columns:1fr 1fr 1fr;}
 }
+
+
+/* V2.3 300-food database */
+.food-category-grid{
+  grid-template-columns:1fr 1fr;
+}
+@media (min-width:430px){
+  .food-category-grid{grid-template-columns:1fr 1fr 1fr;}
+}
+.food-results{
+  max-height:none;
+}
+.food-card{
+  min-height:74px;
+}
+.food-card .btn{
+  min-width:88px;
+}

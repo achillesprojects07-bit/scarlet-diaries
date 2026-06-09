@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V2.2";
+const BUILD = "V2.3";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -90,8 +90,8 @@ let state = {
   foods: STARTER_FOODS,
   unlockedBadges: new Set(),
   view:"home",
-  foodTab:"My Usual Foods",
-  foodCategory:"My Usual Foods",
+  foodTab:"Breakfast Favorites",
+  foodCategory:"All",
   foodSearch:"",
   meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" }
 };
@@ -622,7 +622,7 @@ function foodConfidence(f){
 }
 
 function renderFoodBuilder(){
-  const categories = ["My Usual Foods","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Hidden Carbs","Search","Add Food"];
+  const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs","Search","Add Food"];
   const total = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
   const itemsHtml = state.meal.items.map((it,i)=>`
     <div class="list-item meal-item">
@@ -646,10 +646,12 @@ function renderFoodBuilder(){
       <div class="list">${itemsHtml}</div>
       <div class="divider-line"></div>
       <div class="kv"><span>Total food carbs</span><strong>${total}g</strong></div>
-      <div class="btn-row" style="margin-top:10px">
-        <button class="btn scarlet" id="goHidden">Next: Hidden Carbs</button>
-        <button class="btn secondary" id="skipHidden">Skip Hidden Carbs</button>
-      </div>
+      ${state.meal.items.length ? `
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn scarlet" id="goHidden">Continue</button>
+          <button class="btn secondary" id="skipHidden">Skip hidden carb check</button>
+        </div>
+      ` : `<p class="muted small" style="margin-top:10px">Choose food below first. Hidden carbs will come after food is added.</p>`}
     </div>
 
     <div class="card">
@@ -657,12 +659,10 @@ function renderFoodBuilder(){
       <div class="food-category-grid">
         ${categories.map(c => `<button class="food-chip ${state.foodCategory===c ? "active":""}" data-food-cat="${c}">${c}</button>`).join("")}
       </div>
-      ${state.foodCategory === "Search" ? `
-        <div class="field">
-          <label>Search all foods</label>
-          <input id="foodSearch" value="${esc(state.foodSearch || "")}" placeholder="Try rice, milk, juice…" />
-        </div>
-      ` : ""}
+      <div class="field">
+        <label>Search food by name or first letters</label>
+        <input id="foodSearch" value="${esc(state.foodSearch || "")}" placeholder="Try r, rice, milk, pita…" />
+      </div>
       <div id="foodResults" class="list food-results"></div>
     </div>
   `, "meal");
@@ -687,20 +687,27 @@ function renderFoodBuilder(){
     const results = document.getElementById("foodResults");
     let foods = state.foods.filter(f => f.active !== false);
 
-    if(state.foodCategory === "My Usual Foods"){
-      foods = foods.filter(f => f.favorite || f.verified || String(f.category).includes("Usual"));
+    if(state.foodCategory === "All"){
+      const term = (state.foodSearch || "").toLowerCase().trim();
+      if(term){
+        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
+      }
     }else if(state.foodCategory === "Search"){
       const term = (state.foodSearch || "").toLowerCase().trim();
       if(term){
-        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
+        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
       }else{
-        foods = foods.filter(f => f.favorite).slice(0,10);
+        foods = foods.filter(f => f.favorite).slice(0,20);
       }
     }else{
       foods = foods.filter(f => f.category === state.foodCategory);
     }
 
-    foods = foods.sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite) || String(a.name).localeCompare(String(b.name))).slice(0,18);
+    const globalTerm = (state.foodSearch || "").toLowerCase().trim();
+    if(globalTerm && state.foodCategory !== "All" && state.foodCategory !== "Search"){
+      foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(globalTerm) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(globalTerm));
+    }
+    foods = foods.sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite) || String(a.name).localeCompare(String(b.name))).slice(0,40);
 
     if(!foods.length){
       results.innerHTML = `<p class="muted small">No food found here. Try Search or Add Food.</p>`;
@@ -730,11 +737,13 @@ function renderFoodBuilder(){
     toast("Removed.");
     renderFoodBuilder();
   });
-  document.getElementById("goHidden").onclick = () => {
+  const goHidden = document.getElementById("goHidden");
+  if(goHidden) goHidden.onclick = () => {
     if(!state.meal.items.length) return toast("Add at least one food first.");
     renderHiddenCarbs();
   };
-  document.getElementById("skipHidden").onclick = () => {
+  const skipHidden = document.getElementById("skipHidden");
+  if(skipHidden) skipHidden.onclick = () => {
     if(!state.meal.items.length) return toast("Add at least one food first.");
     state.meal.hiddenChecked = true;
     renderMealEstimate();
@@ -742,11 +751,13 @@ function renderFoodBuilder(){
 }
 
 function renderPortionChooser(food){
-  const portions = [
-    { label:"Small", portion: food.smallPortion || "small serving", carbs:Number(food.smallCarbs ?? Math.round(Number(food.carbs || 0) * .5)) },
-    { label:"Usual", portion: food.usualPortion || food.portion || "usual serving", carbs:Number(food.usualCarbs ?? food.carbs ?? 0) },
-    { label:"Large", portion: food.largePortion || "large serving", carbs:Number(food.largeCarbs ?? Math.round(Number(food.carbs || 0) * 1.5)) }
-  ];
+  const portions = Array.isArray(food.portionOptions) && food.portionOptions.length
+    ? food.portionOptions.map(p => ({ label:p.label || p.portion, portion:p.portion || p.label, carbs:Number(p.carbs || 0) }))
+    : [
+      { label:food.smallPortion || "small serving", portion: food.smallPortion || "small serving", carbs:Number(food.smallCarbs ?? Math.round(Number(food.carbs || 0) * .5)) },
+      { label:food.usualPortion || food.portion || "usual serving", portion: food.usualPortion || food.portion || "usual serving", carbs:Number(food.usualCarbs ?? food.carbs ?? 0) },
+      { label:food.largePortion || "large serving", portion: food.largePortion || "large serving", carbs:Number(food.largeCarbs ?? Math.round(Number(food.carbs || 0) * 1.5)) }
+    ];
 
   layout(`
     <div class="card dark">
@@ -756,8 +767,8 @@ function renderPortionChooser(food){
     <div class="grid single">
       ${portions.map((p,i)=>`
         <button class="action" data-portion="${i}">
-          <strong>${esc(p.label)} — ${esc(p.portion)}</strong>
-          <span>${p.carbs}g carbs</span>
+          <strong>${esc(p.label)}</strong>
+          <span>${esc(p.portion)} · ${p.carbs}g carbs</span>
         </button>
       `).join("")}
       <button class="action" id="customPortionBtn"><strong>Custom carbs</strong><span>Use this if an adult knows the carb count.</span></button>
@@ -852,11 +863,11 @@ async function searchOpenFoodFacts(term){
 }
 
 function renderFoodLibrary(){
-  const categories = ["My Usual Foods","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Hidden Carbs","Search","Add Food"];
-  const active = state.foodCategory || "My Usual Foods";
+  const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs","Search","Add Food"];
+  const active = state.foodCategory || "All";
   let foods = state.foods.filter(f => f.active !== false);
 
-  if(active === "My Usual Foods") foods = foods.filter(f => f.favorite || f.verified || String(f.category).includes("Usual"));
+  if(active === "All") foods = foods;
   else if(active === "Search") foods = foods.slice(0,0);
   else if(active === "Add Food") foods = [];
   else foods = foods.filter(f => f.category === active);
@@ -971,7 +982,7 @@ function renderCustomFoodForm(returnTo="library"){
       <h2>Add Family Food</h2>
       <p class="muted">Use this for meals Amara actually eats. These become easier to find next time.</p>
       <div class="field"><label>Food name</label><input id="customName" placeholder="Example: Mom's rice bowl" /></div>
-      <div class="field"><label>Category</label><select id="customCategory"><option>My Usual Foods</option><option>Meals</option><option>Rice / Bread / Pasta</option><option>Snacks & Sweets</option><option>Fruit</option><option>Drinks</option><option>Hidden Carbs</option></select></div>
+      <div class="field"><label>Category</label><select id="customCategory"><option>Breakfast Favorites</option><option>Meal Favorites</option><option>Meals</option><option>Rice / Bread / Pasta</option><option>Snacks & Sweets</option><option>Fruit</option><option>Drinks</option><option>Sauces / Hidden Carbs</option></select></div>
       <div class="field"><label>Portion</label><input id="customPortion" placeholder="1 cup, 1 piece, 1 pack…" /></div>
       <div class="field"><label>Total carbs</label><input id="customCarbs" type="number" inputmode="numeric" placeholder="grams" /></div>
       <div class="field"><label>Calories</label><input id="customCalories" type="number" inputmode="numeric" placeholder="optional" /></div>
