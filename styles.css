@@ -35,8 +35,8 @@
   --plum2:      #6b2050;
 
   /* Semantic */
-  --safe:       #2a7a52;
-  --safe2:      #3da870;
+  --safe:       #9a7830;
+  --safe2:      #c9a84c;
   --warn:       #b85c20;
   --danger:     #9a1520;
   --danger2:    #c0192a;
@@ -483,8 +483,8 @@ h3 {
   box-shadow:var(--shadow-md);
 }
 .card.success {
-  border-left:4px solid var(--safe2);
-  background:rgba(42,122,82,0.08);
+  border-left:4px solid var(--gold);
+  background:rgba(201,168,76,0.07);
 }
 .card.warning {
   border-left:4px solid var(--warn);
@@ -573,7 +573,7 @@ h3 {
 }
 .btn.orange { background:linear-gradient(135deg,#8a3810,var(--warn)); }
 .btn.red    { background:linear-gradient(135deg,var(--danger),var(--danger2)); }
-.btn.green  { background:linear-gradient(135deg,#1d5c38,var(--safe)); }
+.btn.green  { background:linear-gradient(135deg,#6b5020,var(--safe)); }
 .btn.full   { width:100%; justify-content:center; text-align:center; display:block; border-radius:var(--r-md); padding:14px 18px; }
 .btn.scarlet { background:linear-gradient(135deg, var(--blood), var(--scarlet)); }
 .btn:active, .btn.is-pressed { transform:scale(0.97); }
@@ -648,7 +648,7 @@ label {
   gap:10px;
 }
 .list-item:last-child { border-bottom:0; }
-.meal-item { border-color:rgba(42,122,82,0.2); }
+.meal-item { border-color:rgba(201,168,76,0.15); }
 
 /* ─────────────────────────────────────
    DIVIDERS
@@ -945,7 +945,7 @@ button {
 }
 button.is-pressed, button:active { transform:scale(0.97); }
 button.added, .btn.added {
-  background:linear-gradient(135deg, #1d5c38, var(--safe)) !important;
+  background:linear-gradient(135deg, #6b5020, var(--safe)) !important;
   color:#fff !important;
   border-color:rgba(61,168,112,0.4) !important;
 }
