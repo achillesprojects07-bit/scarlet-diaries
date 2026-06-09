@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V2.3";
+const BUILD = "V2.4";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -120,6 +120,10 @@ function setBusy(btn, text="Saving…"){
     btn.disabled = false;
     btn.innerHTML = original;
   };
+}
+
+function scrollToTopSoon(){
+  setTimeout(() => window.scrollTo({ top:0, behavior:"smooth" }), 80);
 }
 
 function renderFlowDone({title="Saved", message="", next=[]} = {}){
@@ -623,7 +627,8 @@ function foodConfidence(f){
 
 function renderFoodBuilder(){
   const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs","Search","Add Food"];
-  const total = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
+  const foodCarbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
+  const hasFood = state.meal.items.length > 0;
   const itemsHtml = state.meal.items.map((it,i)=>`
     <div class="list-item meal-item">
       <div>
@@ -633,7 +638,7 @@ function renderFoodBuilder(){
       </div>
       <button class="btn secondary" data-remove="${i}">Remove</button>
     </div>
-  `).join("") || `<p class="muted small">No foods added yet. Tap Add beside a food below.</p>`;
+  `).join("") || `<p class="muted small">No food added yet. Choose food below.</p>`;
 
   layout(`
     <div class="card dark">
@@ -641,21 +646,21 @@ function renderFoodBuilder(){
       <p class="tagline" style="text-align:left;margin-top:6px">Tap what is on your plate.</p>
     </div>
 
-    <div class="card meal-summary-sticky">
+    <div class="card meal-summary-sticky" id="mealSoFar">
       <h3>Meal so far</h3>
       <div class="list">${itemsHtml}</div>
       <div class="divider-line"></div>
-      <div class="kv"><span>Total food carbs</span><strong>${total}g</strong></div>
-      ${state.meal.items.length ? `
+      <div class="kv"><span>Total food carbs</span><strong>${foodCarbs}g</strong></div>
+      ${hasFood ? `
         <div class="btn-row" style="margin-top:10px">
           <button class="btn scarlet" id="goHidden">Continue</button>
-          <button class="btn secondary" id="skipHidden">Skip hidden carb check</button>
+          <button class="btn secondary" id="skipHidden">No hidden carbs</button>
         </div>
-      ` : `<p class="muted small" style="margin-top:10px">Choose food below first. Hidden carbs will come after food is added.</p>`}
+      ` : `<p class="muted small" style="margin-top:10px">Add food first. The hidden-carb check comes after food is added.</p>`}
     </div>
 
-    <div class="card">
-      <h3>Food groups</h3>
+    <div class="card" id="foodGroupsCard">
+      <h3>Choose a food group</h3>
       <div class="food-category-grid">
         ${categories.map(c => `<button class="food-chip ${state.foodCategory===c ? "active":""}" data-food-cat="${c}">${c}</button>`).join("")}
       </div>
@@ -686,14 +691,13 @@ function renderFoodBuilder(){
   function drawFoodResults(){
     const results = document.getElementById("foodResults");
     let foods = state.foods.filter(f => f.active !== false);
+    const term = (state.foodSearch || "").toLowerCase().trim();
 
     if(state.foodCategory === "All"){
-      const term = (state.foodSearch || "").toLowerCase().trim();
       if(term){
         foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
       }
     }else if(state.foodCategory === "Search"){
-      const term = (state.foodSearch || "").toLowerCase().trim();
       if(term){
         foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
       }else{
@@ -701,16 +705,15 @@ function renderFoodBuilder(){
       }
     }else{
       foods = foods.filter(f => f.category === state.foodCategory);
+      if(term){
+        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
+      }
     }
 
-    const globalTerm = (state.foodSearch || "").toLowerCase().trim();
-    if(globalTerm && state.foodCategory !== "All" && state.foodCategory !== "Search"){
-      foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(globalTerm) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(globalTerm));
-    }
     foods = foods.sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite) || String(a.name).localeCompare(String(b.name))).slice(0,40);
 
     if(!foods.length){
-      results.innerHTML = `<p class="muted small">No food found here. Try Search or Add Food.</p>`;
+      results.innerHTML = `<p class="muted small">No food found. Try All, Search, or Add Food.</p>`;
       return;
     }
 
@@ -718,15 +721,20 @@ function renderFoodBuilder(){
       <div class="food-card">
         <div>
           <strong>${esc(f.name)}</strong>
-          <span class="small muted">${esc(f.usualPortion || f.portion || "usual serving")} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
+          <span class="small muted">${esc(f.usualPortion || f.portion || "serving")} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
+          <div class="confidence">${esc(f.category || "Food")}</div>
         </div>
         <button class="btn scarlet" data-choose-food="${i}">Choose</button>
       </div>
     `).join("");
 
     results.querySelectorAll("[data-choose-food]").forEach(btn => btn.onclick = () => {
+      const restore = setBusy(btn, "Opening…");
       const food = foods[Number(btn.dataset.chooseFood)];
-      renderPortionChooser(food);
+      setTimeout(() => {
+        restore();
+        renderPortionChooser(food);
+      }, 120);
     });
   }
 
@@ -737,6 +745,7 @@ function renderFoodBuilder(){
     toast("Removed.");
     renderFoodBuilder();
   });
+
   const goHidden = document.getElementById("goHidden");
   if(goHidden) goHidden.onclick = () => {
     if(!state.meal.items.length) return toast("Add at least one food first.");
@@ -748,6 +757,7 @@ function renderFoodBuilder(){
     state.meal.hiddenChecked = true;
     renderMealEstimate();
   };
+  scrollToTopSoon();
 }
 
 function renderPortionChooser(food){
@@ -761,8 +771,9 @@ function renderPortionChooser(food){
 
   layout(`
     <div class="card dark">
-      <h2>${esc(food.name)}</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Choose the closest portion.</p>
+      <button class="btn secondary" id="backToFoodGroups">← Back to Foods</button>
+      <h2 style="margin-top:12px">${esc(food.name)}</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Choose the closest measured portion.</p>
     </div>
     <div class="grid single">
       ${portions.map((p,i)=>`
@@ -772,10 +783,10 @@ function renderPortionChooser(food){
         </button>
       `).join("")}
       <button class="action" id="customPortionBtn"><strong>Custom carbs</strong><span>Use this if an adult knows the carb count.</span></button>
-      <button class="action" id="backFoods"><strong>Back to foods</strong><span>Choose another food.</span></button>
     </div>
   `, "meal");
 
+  document.getElementById("backToFoodGroups").onclick = () => renderFoodBuilder();
   document.querySelectorAll("[data-portion]").forEach(btn => btn.onclick = () => {
     const restore = setBusy(btn, "Adding…");
     const p = portions[Number(btn.dataset.portion)];
@@ -789,27 +800,65 @@ function renderPortionChooser(food){
       restore();
       btn.classList.add("added");
       toast("Food added.");
-      renderFoodBuilder();
+      renderMealAdded(food.name);
     }, 180);
   });
 
   document.getElementById("customPortionBtn").onclick = () => renderCustomPortion(food);
-  document.getElementById("backFoods").onclick = () => renderFoodBuilder();
+  scrollToTopSoon();
+}
+
+function renderMealAdded(foodName){
+  const foodCarbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
+  layout(`
+    <div class="card success">
+      <h2>Added ✓</h2>
+      <p class="muted">${esc(foodName)} was added to the meal.</p>
+    </div>
+    <div class="card" id="mealSoFar">
+      <h3>Meal so far</h3>
+      <div class="list">
+        ${state.meal.items.map((it,i)=>`
+          <div class="list-item meal-item">
+            <div>
+              <strong>${esc(it.name)}</strong>
+              <span class="small muted">${esc(it.portion)} · ${it.carbs}g carbs</span>
+            </div>
+            <button class="btn secondary" data-remove="${i}">Remove</button>
+          </div>
+        `).join("")}
+      </div>
+      <div class="divider-line"></div>
+      <div class="kv"><span>Total food carbs</span><strong>${foodCarbs}g</strong></div>
+    </div>
+    <div class="grid single">
+      <button class="action" id="addMoreFood"><strong>Add more food</strong><span>Go back to food groups.</span></button>
+      <button class="action scarlet" id="continueHidden"><strong>Continue</strong><span>Check sauces, breading, drinks, or hidden carbs.</span></button>
+    </div>
+  `, "meal");
+  document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => {
+    state.meal.items.splice(Number(btn.dataset.remove),1);
+    toast("Removed.");
+    if(state.meal.items.length) renderMealAdded("Food"); else renderFoodBuilder();
+  });
+  document.getElementById("addMoreFood").onclick = () => renderFoodBuilder();
+  document.getElementById("continueHidden").onclick = () => renderHiddenCarbs();
+  scrollToTopSoon();
 }
 
 function renderCustomPortion(food){
   layout(`
     <div class="card">
-      <h2>Custom Carbs</h2>
+      <button class="btn secondary" id="backToPortions">← Back to portions</button>
+      <h2 style="margin-top:12px">Custom Carbs</h2>
       <p class="muted">Use this only if an adult or label knows the carb count.</p>
       <div class="field"><label>Portion description</label><input id="customPortionText" placeholder="Example: half plate, 1 pack, 3 pieces" /></div>
       <div class="field"><label>Carbs</label><input id="customPortionCarbs" type="number" inputmode="numeric" placeholder="grams of carbs" /></div>
       <button class="btn scarlet full" id="addCustomPortion">Add to meal</button>
-      <button class="btn secondary full" style="margin-top:10px" id="cancelCustomPortion">Cancel</button>
     </div>
   `, "meal");
 
-  document.getElementById("cancelCustomPortion").onclick = () => renderPortionChooser(food);
+  document.getElementById("backToPortions").onclick = () => renderPortionChooser(food);
   document.getElementById("addCustomPortion").onclick = () => {
     const btn = document.getElementById("addCustomPortion");
     const restore = setBusy(btn, "Adding…");
@@ -819,255 +868,55 @@ function renderCustomPortion(food){
     state.meal.items.push({ ...food, portion, carbs });
     restore();
     toast("Food added.");
-    renderFoodBuilder();
+    renderMealAdded(food.name);
   };
-}
-
-function foodButtonHtml(f,i){
-  return `<div class="list-item">
-    <div>
-      <strong>${esc(f.name)}</strong>
-      <span class="small muted">${esc(f.portion || "serving")} · ${Number(f.carbs||0)}g carbs · ${esc(f.calories || 0)} kcal</span>
-      <div class="confidence">${esc(foodConfidence(f))}</div>
-    </div>
-    <button class="btn scarlet" data-food="${i}">Add</button>
-  </div>`;
-}
-
-async function searchOpenFoodFacts(term){
-  try{
-    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=8`;
-    const res = await fetch(url);
-    if(!res.ok) return [];
-    const data = await res.json();
-    return (data.products || []).map(p => {
-      const n = p.nutriments || {};
-      const carbs100 = Number(n.carbohydrates_100g || n.carbohydrates || 0);
-      const kcal100 = Number(n["energy-kcal_100g"] || n["energy-kcal"] || 0);
-      return {
-        name: p.product_name || p.generic_name || "Packaged food",
-        category: "Packaged",
-        portion: "100g / label estimate",
-        carbs: Math.round(carbs100),
-        calories: Math.round(kcal100),
-        source: "Open Food Facts",
-        confidence: "High",
-        hidden:false,
-        verified:false
-      };
-    }).filter(f => f.name && f.carbs >= 0);
-  }catch(err){
-    console.warn("Open Food Facts search failed", err);
-    return [];
-  }
-}
-
-function renderFoodLibrary(){
-  const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs","Search","Add Food"];
-  const active = state.foodCategory || "All";
-  let foods = state.foods.filter(f => f.active !== false);
-
-  if(active === "All") foods = foods;
-  else if(active === "Search") foods = foods.slice(0,0);
-  else if(active === "Add Food") foods = [];
-  else foods = foods.filter(f => f.category === active);
-
-  layout(`
-    <div class="card dark">
-      <h2>Food & Carb Library</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Simple foods. Clear portions. Dependable carbs.</p>
-    </div>
-    <div class="card">
-      <div class="food-category-grid">
-        ${categories.map(t => `<button class="food-chip ${active===t ? "active":""}" data-food-tab="${t}">${t}</button>`).join("")}
-      </div>
-      ${active === "Search" ? `<div class="field"><label>Search all foods</label><input id="librarySearch" placeholder="Try rice, milk, juice…" /></div><div id="librarySearchResults" class="list"></div>` : ""}
-      ${active === "Add Food" ? `<button class="btn scarlet full" id="addCustomFood">Add custom family food</button>` : ""}
-      <div class="divider-line"></div>
-      <div class="list" id="libraryFoods">
-        ${foods.slice().sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite)||String(a.name).localeCompare(String(b.name))).slice(0,60).map(f => `
-          <div class="list-item">
-            <div>
-              <strong>${esc(f.name)}</strong>
-              <span class="small muted">${esc(f.usualPortion || f.portion)} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
-              <div class="confidence">${esc(f.source || "Food list")}</div>
-            </div>
-            <button class="btn secondary" data-edit-food="${esc(f.id || "")}">Edit</button>
-          </div>
-        `).join("") || (active === "Search" || active === "Add Food" ? "" : `<p class="muted small">No foods in this group yet.</p>`)}
-      </div>
-    </div>
-  `, "foods");
-
-  document.querySelectorAll("[data-food-tab]").forEach(btn => btn.onclick = () => {
-    btn.classList.add("selected-flash");
-    state.foodCategory = btn.dataset.foodTab;
-    if(state.foodCategory === "Add Food") renderCustomFoodForm("library");
-    else renderFoodLibrary();
-  });
-
-  const addBtn = document.getElementById("addCustomFood");
-  if(addBtn) addBtn.onclick = () => renderCustomFoodForm("library");
-
-  const search = document.getElementById("librarySearch");
-  if(search){
-    const box = document.getElementById("librarySearchResults");
-    search.oninput = () => {
-      const term = search.value.toLowerCase().trim();
-      const results = !term ? [] : state.foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term)).slice(0,30);
-      box.innerHTML = results.map(f => `
-        <div class="list-item">
-          <div>
-            <strong>${esc(f.name)}</strong>
-            <span class="small muted">${esc(f.usualPortion || f.portion)} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
-            <div class="confidence">${esc(f.source || "Food list")}</div>
-          </div>
-          <button class="btn secondary" data-edit-food="${esc(f.id || "")}">Edit</button>
-        </div>
-      `).join("") || (term ? `<p class="muted small">No result. Add this as a custom food.</p>` : "");
-      box.querySelectorAll("[data-edit-food]").forEach(btn => btn.onclick = () => {
-        const food = state.foods.find(f => f.id === btn.dataset.editFood);
-        if(food) renderEditFoodForm(food);
-      });
-    };
-  }
-
-  document.querySelectorAll("#libraryFoods [data-edit-food]").forEach(btn => btn.onclick = () => {
-    const food = state.foods.find(f => f.id === btn.dataset.editFood);
-    if(food) renderEditFoodForm(food);
-  });
-}
-
-function renderEditFoodForm(food){
-  layout(`
-    <div class="card">
-      <h2>Edit Food</h2>
-      <p class="muted">Adjust the carb count, portion, or category if the family learns a better estimate.</p>
-      <div class="field"><label>Food name</label><input id="editName" value="${esc(food.name || "")}" /></div>
-      <div class="field"><label>Category</label><select id="editCategory">${["Favorites","Saved Foods","Meals","Rice, Bread & Grains","Snacks & Sweets","Fruits","Drinks","Hidden Carbs","Packaged Foods"].map(c => `<option ${food.category===c ? "selected":""}>${c}</option>`).join("")}</select></div>
-      <div class="field"><label>Portion</label><input id="editPortion" value="${esc(food.portion || "")}" /></div>
-      <div class="field"><label>Carbs</label><input id="editCarbs" type="number" inputmode="numeric" value="${Number(food.carbs||0)}" /></div>
-      <div class="field"><label>Calories</label><input id="editCalories" type="number" inputmode="numeric" value="${Number(food.calories||0)}" /></div>
-      <div class="field"><label>Tags</label><input id="editTags" value="${esc(food.tags || "")}" placeholder="Home, School, Greek, Filipino, Favorite…" /></div>
-      <div class="field"><label>Favorite?</label><select id="editFavorite"><option value="false">No</option><option value="true" ${food.favorite ? "selected":""}>Yes</option></select></div>
-      <button class="btn scarlet full" id="saveFoodEdit">Save changes</button>
-      <button class="btn secondary full" id="cancelFoodEdit">Cancel</button>
-    </div>
-  `, "foods");
-  document.getElementById("cancelFoodEdit").onclick = () => renderFoodLibrary();
-  document.getElementById("saveFoodEdit").onclick = async () => {
-    const restore = setBusy(document.getElementById("saveFoodEdit"), "Saving changes…");
-    const updates = {
-      name: document.getElementById("editName").value.trim(),
-      category: document.getElementById("editCategory").value,
-      portion: document.getElementById("editPortion").value.trim(),
-      carbs: Number(document.getElementById("editCarbs").value),
-      calories: Number(document.getElementById("editCalories").value || 0),
-      tags: document.getElementById("editTags").value.trim(),
-      favorite: document.getElementById("editFavorite").value === "true",
-      updatedAt: serverTimestamp()
-    };
-    if(!updates.name || isNaN(updates.carbs)){ restore(); return toast("Food name and carbs are required."); }
-    await updateDoc(doc(db,"families",FAMILY_ID,"foodLibrary",food.id), updates);
-    Object.assign(food, updates);
-    restore();
-    toast("Food saved.");
-    renderFoodLibrary();
-  };
-}
-
-function renderCustomFoodForm(returnTo="library"){
-  layout(`
-    <div class="card">
-      <h2>Add Family Food</h2>
-      <p class="muted">Use this for meals Amara actually eats. These become easier to find next time.</p>
-      <div class="field"><label>Food name</label><input id="customName" placeholder="Example: Mom's rice bowl" /></div>
-      <div class="field"><label>Category</label><select id="customCategory"><option>Breakfast Favorites</option><option>Meal Favorites</option><option>Meals</option><option>Rice / Bread / Pasta</option><option>Snacks & Sweets</option><option>Fruit</option><option>Drinks</option><option>Sauces / Hidden Carbs</option></select></div>
-      <div class="field"><label>Portion</label><input id="customPortion" placeholder="1 cup, 1 piece, 1 pack…" /></div>
-      <div class="field"><label>Total carbs</label><input id="customCarbs" type="number" inputmode="numeric" placeholder="grams" /></div>
-      <div class="field"><label>Calories</label><input id="customCalories" type="number" inputmode="numeric" placeholder="optional" /></div>
-      <button class="btn scarlet full" id="saveCustomFood">Save as family food</button>
-      <button class="btn secondary full" id="cancelCustomFood">Cancel</button>
-    </div>
-  `, "foods");
-  document.getElementById("cancelCustomFood").onclick = () => returnTo === "meal" ? renderFoodBuilder() : renderFoodLibrary();
-  document.getElementById("saveCustomFood").onclick = async () => {
-    const f = {
-      name: document.getElementById("customName").value.trim(),
-      category: document.getElementById("customCategory").value || "Saved Foods",
-      portion: document.getElementById("customPortion").value.trim() || "1 serving",
-      carbs: Number(document.getElementById("customCarbs").value),
-      calories: Number(document.getElementById("customCalories").value || 0),
-      source: "Family Verified",
-      confidence: "High",
-      verified:true,
-      hidden:false,
-      active:true,
-      familyId:FAMILY_ID,
-      updatedAt: serverTimestamp()
-    };
-    if(!f.name || isNaN(f.carbs)) return toast("Please enter food name and carbs.");
-    const restore = setBusy(document.getElementById("saveCustomFood"), "Adding food…");
-    const id = f.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now().toString().slice(-5);
-    await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",id), f);
-    restore();
-    state.foods.unshift({ id, ...f });
-    await unlockBadge("family-food-keeper");
-    toast("Family food saved.");
-    if(returnTo === "meal"){
-      state.meal.items.push(f);
-      renderFoodBuilder();
-    }else{
-      showBadgeModal("family-food-keeper", () => renderFoodLibrary());
-    }
-  };
+  scrollToTopSoon();
 }
 
 function renderHiddenCarbs(){
   const options = [
-    {name:"Sauce / gravy", small:5, usual:10, large:15},
-    {name:"Breading", small:5, usual:8, large:15},
-    {name:"Ketchup / sweet sauce", small:3, usual:5, large:10},
-    {name:"Honey / syrup", small:6, usual:17, large:34},
-    {name:"Sweet drink sip", small:5, usual:10, large:20}
+    {name:"Ketchup / sweet sauce", portions:[["1 tsp",2],["1 tbsp",5],["2 tbsp",10],["1/4 cup",20]]},
+    {name:"Gravy", portions:[["1 tbsp",2],["1/4 cup",6],["1/2 cup",12]]},
+    {name:"Breading", portions:[["thin coating",5],["usual coating",8],["heavy coating",15]]},
+    {name:"Honey / syrup", portions:[["1 tsp",6],["1 tbsp",17],["2 tbsp",34]]},
+    {name:"Sweet drink", portions:[["1/2 cup",12],["1 cup",25],["1 bottle/can",39]]}
   ];
 
   layout(`
     <div class="card dark">
-      <h2>Hidden Carbs</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Add only what might be hiding in the meal.</p>
+      <button class="btn secondary" id="backToMeal">← Back to Meal</button>
+      <h2 style="margin-top:12px">Check Hidden Carbs</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Any sauces, breading, or sweet drinks?</p>
     </div>
     <div class="card">
-      <p class="muted small">If unsure, choose “I’m not sure” and ask an adult.</p>
+      <p class="muted small">Add only what might be hiding in the meal. If none, continue.</p>
     </div>
     <div class="list">
       ${options.map((o,i)=>`
         <div class="card">
           <h3>${esc(o.name)}</h3>
           <div class="hidden-carb-grid">
-            <button class="btn secondary" data-hidden="${i}" data-size="small">A little<br><span>+${o.small}g</span></button>
-            <button class="btn secondary" data-hidden="${i}" data-size="usual">Some<br><span>+${o.usual}g</span></button>
-            <button class="btn secondary" data-hidden="${i}" data-size="large">A lot<br><span>+${o.large}g</span></button>
+            ${o.portions.map((p,j)=>`<button class="btn secondary" data-hidden="${i}" data-portion="${j}">${esc(p[0])}<br><span>+${p[1]}g</span></button>`).join("")}
           </div>
         </div>
       `).join("")}
     </div>
     <div class="grid single">
       <button class="action" id="notSureHidden"><strong>I’m not sure</strong><span>Ask an adult before dosing.</span></button>
-      <button class="action scarlet" id="finishHidden"><strong>Done</strong><span>Show suggested Apidra.</span></button>
+      <button class="action scarlet" id="finishHidden"><strong>Continue to suggested Apidra</strong><span>Show the total estimate.</span></button>
     </div>
   `, "meal");
 
+  document.getElementById("backToMeal").onclick = () => renderMealAdded("Meal");
   document.querySelectorAll("[data-hidden]").forEach(btn => btn.onclick = async () => {
     const restore = setBusy(btn, "Adding…");
     const o = options[Number(btn.dataset.hidden)];
-    const size = btn.dataset.size;
-    const carbs = Number(o[size]);
+    const p = o.portions[Number(btn.dataset.portion)];
     state.meal.items.push({
       name:o.name,
-      category:"Hidden Carbs",
-      portion:size === "small" ? "a little" : size === "large" ? "a lot" : "some",
-      carbs,
+      category:"Sauces / Hidden Carbs",
+      portion:p[0],
+      carbs:Number(p[1]),
       calories:0,
       source:"Hidden carb estimate"
     });
@@ -1076,7 +925,8 @@ function renderHiddenCarbs(){
     setTimeout(() => {
       restore();
       btn.classList.add("added");
-      toast(`Added ${carbs}g hidden carbs.`);
+      btn.innerHTML = `Added ✓<br><span>+${p[1]}g</span>`;
+      toast(`Added ${p[1]}g hidden carbs.`);
     }, 150);
   });
 
@@ -1091,6 +941,7 @@ function renderHiddenCarbs(){
     restore();
     renderMealEstimate();
   };
+  scrollToTopSoon();
 }
 
 function roundDose(raw){ const unit = Number(state.settings.doseRounding || 1); return Math.round(raw / unit) * unit; }
@@ -1106,39 +957,48 @@ function renderMealEstimate(){
   const correction = getCorrection(Number(state.meal.glucose));
   const estimated = carbDose + correction;
   layout(`
-    <div class="card dark">
-      <p class="pill">Estimated dose, not a command</p>
-      <h2 style="margin-top:10px">Suggested Apidra: ${estimated} units</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Show this to your Circle before injecting.</p>
+    <div class="card estimate-hero" id="estimateHero">
+      <p class="pill">Suggested only</p>
+      <h2>Suggested Apidra</h2>
+      <div class="dose-number">${estimated}</div>
+      <p class="dose-unit">units</p>
+      <p class="muted small">Confirm with an adult before injecting.</p>
     </div>
     <div class="card">
+      <h3>How this was estimated</h3>
       <div class="kv"><span>Pre-meal glucose</span><strong>${state.meal.glucose} mg/dL</strong></div>
       <div class="kv"><span>Total carbs</span><strong>${carbs}g</strong></div>
       <div class="kv"><span>Carb ratio</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
       <div class="kv"><span>Carb dose rounded</span><strong>${carbDose} units</strong></div>
-      <div class="kv"><span>Pre-meal correction</span><strong>+${correction} units</strong></div>
-      <div class="kv"><span>Total estimate</span><strong>${estimated} units</strong></div>
-      <p class="small muted" style="margin-top:10px">Insulin is calculated from carbs. Calories are for nutrition only.</p>
+      <div class="kv"><span>Glucose correction</span><strong>+${correction} units</strong></div>
+      <p class="small muted" style="margin-top:10px">Insulin is calculated from carbs plus the saved family correction plan. Calories are for nutrition only.</p>
     </div>
     <div class="grid single">
-      <button class="action scarlet" id="adultConfirmed"><strong>Adult confirmed</strong><span>Save meal and insulin estimate.</span></button>
-      ${CIRCLE.map(name => `<button class="action" data-call="${name}"><strong>I need ${name}</strong><span>Alert the Circle.</span></button>`).join("")}
-      <button class="action" id="alone"><strong>I am alone</strong><span>Send alert and save safety note.</span></button>
-      <button class="action" id="injected"><strong>I already injected</strong><span>Log actual insulin and alert adults.</span></button>
+      <button class="action scarlet" id="adultConfirmed"><strong>Adult confirmed</strong><span>Save meal and automatically log Apidra.</span></button>
+      ${CIRCLE.map(name => `<button class="action" data-call="${name}"><strong>I need ${name}</strong><span>Alert the Circle before dosing.</span></button>`).join("")}
+      <button class="action" id="saveNoInsulin"><strong>Save without insulin</strong><span>Save meal only for adult review.</span></button>
+      <button class="action" id="backFoodFromEstimate"><strong>Back to food</strong><span>Change or add food.</span></button>
     </div>
   `, "meal");
   document.getElementById("adultConfirmed").onclick = async () => {
     const btn = document.getElementById("adultConfirmed");
-    const restore = setBusy(btn, "Saving meal…");
+    const restore = setBusy(btn, "Saving meal and insulin…");
     try{
-      await saveMealLog({ adultConfirmed:true, actualDose:estimated });
+      await saveMealLog({ adultConfirmed:true, actualDose:estimated, autoLogInsulin:true });
     }finally{
       restore();
     }
   };
-  document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => { await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Suggested Apidra: ${estimated} units.`); await unlockBadge("caller-circle"); toast(`${b.dataset.call} alert saved.`); });
-  document.getElementById("alone").onclick = async () => { await createAlert("alone","red",`Amara says she is alone during meal dosing. Suggested Apidra: ${estimated} units.`); toast("The Circle has been alerted."); };
-  document.getElementById("injected").onclick = () => saveMealLog({ adultConfirmed:false, actualDose:estimated, alreadyInjected:true });
+  document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => {
+    const restore = setBusy(b, "Sending alert…");
+    await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Suggested Apidra: ${estimated} units.`);
+    await unlockBadge("caller-circle");
+    restore();
+    toast(`${b.dataset.call} alert saved.`);
+  });
+  document.getElementById("saveNoInsulin").onclick = () => saveMealLog({ adultConfirmed:false, actualDose:null, noInsulin:true });
+  document.getElementById("backFoodFromEstimate").onclick = () => renderFoodBuilder();
+  scrollToTopSoon();
 }
 
 async function saveMealLog(extra={}){
@@ -1164,15 +1024,24 @@ async function saveMealLog(extra={}){
   });
   await unlockBadge("scarlet-sentinel");
   await unlockBadge("feast-reader");
+  if(extra.autoLogInsulin && actualDose){
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
+      insulinType:"Apidra",
+      dose:Number(actualDose),
+      reason:"Meal - adult confirmed",
+      linkedMeal:true,
+      createdAt:serverTimestamp(),
+      enteredBy:state.user.uid
+    });
+  }
   if(extra.alreadyInjected) await createAlert("already_injected","orange",`Amara logged that she already injected ${estimatedDose} units Apidra.`);
-  toast("Meal and suggested insulin saved.");
+  toast(extra.autoLogInsulin ? "Meal saved. Insulin logged." : "Meal saved.");
   renderFlowDone({
-    title:"Meal saved",
-    message:"Your food, carbs, glucose, and suggested Apidra estimate were saved. Confirm with an adult before injecting.",
+    title: extra.autoLogInsulin ? "Meal saved. Insulin logged." : "Meal saved",
+    message: extra.autoLogInsulin ? `Adult confirmed. Apidra logged: ${actualDose} unit(s).` : "Meal saved without insulin. Adult should review.",
     next:[
-      {view:"insulin",title:"Log Insulin",sub:"Use this after adult confirmation."},
-      {view:"pages",title:"My Scarlet Pages",sub:"Reread your entries."},
-      {view:"vault",title:"Open The Scarlet Vault",sub:"See your courage badges."}
+      {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."},
+      {view:"pages",title:"My Scarlet Pages",sub:"Reread your entries."}
     ]
   });
 }
@@ -1192,88 +1061,321 @@ function renderHighSugar(){
   document.getElementById("startHigh").onclick = () => {
     const g = Number(document.getElementById("highGlucose").value);
     if(!g || g < 20 || g > 600) return toast("Please enter a valid glucose number.");
-    state.meal.glucose = g;
-    if(g >= state.settings.highThreshold) renderKetonePrompt("high");
-    else renderHighSugarSafety();
+    state.highFlow = { glucose:g, ketones:null, symptoms:[], recentApidra:null };
+    renderHighKetones();
   };
 }
 
-function renderHighSugarSafety(){
-  const g = state.meal.glucose;
+function renderHighKetones(){
+  const g = state.highFlow.glucose;
   layout(`
-    <div class="card ${g>=state.settings.urgentHighThreshold ? "danger":"warning"}">
-      <h2>${g>=state.settings.urgentHighThreshold ? "Very high sugar" : "High sugar"}</h2>
-      <p class="muted">Drink water. Tell your Circle. Do not keep injecting again and again.</p>
-      <div class="field">
-        <label>Did you take Apidra in the last ${state.settings.insulinStackingHours} hours?</label>
-        <select id="lastApidra">
-          <option value="unknown">I don’t know</option>
-          <option value="yes">Yes</option>
-          <option value="no">No</option>
-        </select>
-      </div>
-      <button class="btn orange full" id="saveHigh">Save high sugar check</button>
+    <div class="card ${g >= state.settings.urgentHighThreshold ? "danger":"warning"}">
+      <h2>High Sugar: ${g} mg/dL</h2>
+      <p class="muted">Check ketones if strips are available. Tell an adult if unsure.</p>
+    </div>
+    <div class="grid single">
+      ${["Ketones negative","Trace / small","Moderate / large","No strips","I don’t know how"].map(k => `<button class="action" data-ketone-high="${k}"><strong>${k}</strong><span>Save ketone status.</span></button>`).join("")}
     </div>
   `, "home");
-  document.getElementById("saveHigh").onclick = async () => {
-    const btn = document.getElementById("saveHigh");
-    const restore = setBusy(btn, "Saving high sugar check…");
-    const last = document.getElementById("lastApidra").value;
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), {
-      glucose:g, context:"high_sugar", lastApidra:last, ketones:state.meal.ketones || null,
-      alertLevel:g>=state.settings.urgentHighThreshold ? "red":"orange", createdAt:serverTimestamp(), enteredBy:state.user.uid
-    });
-    const correction = getCorrection(g);
-    if(last === "yes"){
-      await unlockBadge("no-stack-oath");
-      await createAlert("stacking_risk","red",`Amara logged high glucose ${g} and Apidra within last ${state.settings.insulinStackingHours} hours. Possible stacking risk.`);
+  document.querySelectorAll("[data-ketone-high]").forEach(btn => btn.onclick = async () => {
+    state.highFlow.ketones = btn.dataset.ketoneHigh;
+    await addKetoneLog(g, btn.dataset.ketoneHigh);
+    if(btn.dataset.ketoneHigh === "Moderate / large"){
+      await createAlert("ketones_moderate_large","red",`Amara logged high glucose ${g} with moderate/large ketones.`);
+      return renderEmergency("Moderate or large ketones need adult help now.");
     }
-    await unlockBadge(g>=300 ? "slayer-300" : "stormbreaker");
-    restore();
-    toast("High sugar check saved.");
-    renderFlowDone({
-      title:"High sugar check saved",
-      message:`Suggested correction from saved family plan: ${correction} unit(s). Confirm with an adult before injecting. Drink water and do not stack insulin.`,
-      next:[
-        {view:"circle",title:"Call My Circle",sub:"Tell Mom, Dad, or Tita."},
-        {view:"insulin",title:"Log Insulin",sub:"Only after adult confirmation."},
-        {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
-      ]
-    });
+    renderHighSymptoms();
+  });
+}
+
+function renderHighSymptoms(){
+  const symptomList = ["Vomiting","Stomach pain","Very sleepy","Fast/deep breathing","Very thirsty","Confused","None of these"];
+  layout(`
+    <div class="card warning">
+      <h2>Any warning signs?</h2>
+      <p class="muted">Tap any that apply.</p>
+    </div>
+    <div class="grid">
+      ${symptomList.map(s => `<button class="action" data-high-symptom="${s}"><strong>${s}</strong><span>Tap to select.</span></button>`).join("")}
+    </div>
+    <button class="btn orange full" id="continueHighSymptoms">Continue</button>
+  `, "home");
+  const selected = new Set();
+  document.querySelectorAll("[data-high-symptom]").forEach(btn => btn.onclick = () => {
+    if(btn.dataset.highSymptom === "None of these"){
+      selected.clear();
+      selected.add("None of these");
+      document.querySelectorAll("[data-high-symptom]").forEach(b => b.classList.remove("scarlet"));
+      btn.classList.add("scarlet");
+      return;
+    }
+    selected.delete("None of these");
+    btn.classList.toggle("scarlet");
+    selected.has(btn.dataset.highSymptom) ? selected.delete(btn.dataset.highSymptom) : selected.add(btn.dataset.highSymptom);
+  });
+  document.getElementById("continueHighSymptoms").onclick = async () => {
+    state.highFlow.symptoms = [...selected];
+    const severe = state.highFlow.symptoms.some(s => ["Vomiting","Stomach pain","Very sleepy","Fast/deep breathing","Confused"].includes(s));
+    if(severe){
+      await createAlert("high_symptoms","red",`Amara logged high glucose ${state.highFlow.glucose} with symptoms: ${state.highFlow.symptoms.join(", ")}.`);
+      return renderEmergency("High sugar with these symptoms needs adult help now.");
+    }
+    renderRecentApidra();
   };
+}
+
+function renderRecentApidra(){
+  layout(`
+    <div class="card warning">
+      <h2>Recent Apidra?</h2>
+      <p class="muted">Did you take Apidra in the last ${state.settings.insulinStackingHours} hours?</p>
+    </div>
+    <div class="grid single">
+      <button class="action" data-recent="yes"><strong>Yes</strong><span>Possible insulin stacking. No normal correction suggestion.</span></button>
+      <button class="action scarlet" data-recent="no"><strong>No</strong><span>Show suggested correction from family plan.</span></button>
+      <button class="action" data-recent="unknown"><strong>I don’t know</strong><span>Ask an adult before correction.</span></button>
+    </div>
+  `, "home");
+  document.querySelectorAll("[data-recent]").forEach(btn => btn.onclick = () => {
+    state.highFlow.recentApidra = btn.dataset.recent;
+    if(btn.dataset.recent === "no") renderHighCorrectionEstimate();
+    else renderHighStackingWarning();
+  });
+}
+
+function renderHighStackingWarning(){
+  layout(`
+    <div class="card danger">
+      <h2>Possible insulin stacking</h2>
+      <p class="muted">Do not correct again without an adult or doctor guidance. Drink water. Tell your Circle. Recheck based on the family plan.</p>
+    </div>
+    <div class="grid single">
+      ${CIRCLE.map(n => `<button class="action" data-alert-high="${n}"><strong>Alert ${n}</strong><span>Ask for adult help.</span></button>`).join("")}
+      <button class="action scarlet" id="saveHighNoCorrection"><strong>Save high sugar check</strong><span>No correction dose suggested.</span></button>
+    </div>
+  `, "home");
+  document.querySelectorAll("[data-alert-high]").forEach(btn => btn.onclick = async () => {
+    const restore = setBusy(btn, "Sending alert…");
+    await createAlert("stacking_warning","red",`Amara is high at ${state.highFlow.glucose} and took Apidra recently or is unsure. Alerted ${btn.dataset.alertHigh}.`);
+    restore();
+    toast(`${btn.dataset.alertHigh} alert saved.`);
+  });
+  document.getElementById("saveHighNoCorrection").onclick = () => saveHighFlow({ correctionSuggested:null, adultConfirmed:false, correctionLogged:false });
+}
+
+function renderHighCorrectionEstimate(){
+  const correction = getCorrection(Number(state.highFlow.glucose));
+  layout(`
+    <div class="card estimate-hero">
+      <p class="pill">Suggested only</p>
+      <h2>Suggested Correction</h2>
+      <div class="dose-number">${correction}</div>
+      <p class="dose-unit">units</p>
+      <p class="muted small">Confirm with an adult before injecting.</p>
+    </div>
+    <div class="grid single">
+      <button class="action scarlet" id="adultConfirmHigh"><strong>Adult confirmed</strong><span>Save and log correction Apidra.</span></button>
+      <button class="action" id="saveHighNoInsulin"><strong>Save without insulin</strong><span>Adult should review.</span></button>
+      ${CIRCLE.map(n => `<button class="action" data-alert-high="${n}"><strong>Alert ${n}</strong><span>Ask for adult help.</span></button>`).join("")}
+    </div>
+  `, "home");
+  document.getElementById("adultConfirmHigh").onclick = () => saveHighFlow({ correctionSuggested:correction, adultConfirmed:true, correctionLogged:true });
+  document.getElementById("saveHighNoInsulin").onclick = () => saveHighFlow({ correctionSuggested:correction, adultConfirmed:false, correctionLogged:false });
+  document.querySelectorAll("[data-alert-high]").forEach(btn => btn.onclick = async () => {
+    const restore = setBusy(btn, "Sending alert…");
+    await createAlert("high_help","orange",`Amara is high at ${state.highFlow.glucose}. Suggested correction shown: ${correction} units. Alerted ${btn.dataset.alertHigh}.`);
+    restore();
+    toast(`${btn.dataset.alertHigh} alert saved.`);
+  });
+}
+
+async function saveHighFlow({ correctionSuggested=null, adultConfirmed=false, correctionLogged=false } = {}){
+  const btn = document.querySelector("#adultConfirmHigh, #saveHighNoInsulin, #saveHighNoCorrection");
+  const restore = setBusy(btn, "Saving high sugar check…");
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), {
+    glucose:Number(state.highFlow.glucose),
+    context:"high_sugar",
+    ketones:state.highFlow.ketones,
+    symptoms:state.highFlow.symptoms || [],
+    recentApidra:state.highFlow.recentApidra,
+    correctionSuggested,
+    adultConfirmed,
+    correctionLogged,
+    alertLevel:Number(state.highFlow.glucose)>=state.settings.urgentHighThreshold ? "red":"orange",
+    createdAt:serverTimestamp(),
+    enteredBy:state.user.uid
+  });
+  if(correctionLogged && correctionSuggested){
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
+      insulinType:"Apidra",
+      dose:Number(correctionSuggested),
+      reason:"High sugar correction - adult confirmed",
+      createdAt:serverTimestamp(),
+      enteredBy:state.user.uid
+    });
+  }
+  if(Number(state.highFlow.glucose) >= state.settings.urgentHighThreshold){
+    await createAlert("urgent_high","red",`Amara logged urgent high glucose ${state.highFlow.glucose}. Ketones: ${state.highFlow.ketones}.`);
+  }
+  await unlockBadge(Number(state.highFlow.glucose)>=300 ? "slayer-300" : "stormbreaker");
+  restore();
+  toast(correctionLogged ? "High sugar check saved. Correction logged." : "High sugar check saved.");
+  renderFlowDone({
+    title: correctionLogged ? "High sugar saved. Correction logged." : "High sugar check saved",
+    message: correctionLogged ? `Adult confirmed. Apidra correction logged: ${correctionSuggested} unit(s).` : "No correction insulin was logged. Adult should review.",
+    next:[
+      {view:"circle",title:"Call My Circle",sub:"Ask an adult to help."},
+      {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
+    ]
+  });
 }
 
 function renderLowSugar(preset=null){
   layout(`
     <div class="card danger">
       <h2>Low Sugar</h2>
-      <p><strong>No insulin right now.</strong></p>
-      <p class="muted">Tell your Circle. Take fast sugar based on your plan. Recheck. Do not take insulin while low.</p>
+      <p><strong>No insulin now.</strong></p>
+      <p class="muted">Enter the low reading and follow the steps.</p>
       <div class="field"><label>Glucose mg/dL</label><input id="lowGlucose" type="number" inputmode="numeric" value="${preset || ""}" placeholder="Example: 65" /></div>
-      <div class="field"><label>What did you do?</label><select id="lowAction"><option>I took fast sugar</option><option>I told an adult</option><option>I rechecked</option><option>I feel worse</option></select></div>
-      <button class="btn red full" id="saveLow">Save low sugar check</button>
+      <button class="btn red full" id="startLowFlow">Continue</button>
     </div>
   `, "home");
-  document.getElementById("saveLow").onclick = async () => {
-    const btn = document.getElementById("saveLow");
-    const restore = setBusy(btn, "Saving low sugar check…");
+  document.getElementById("startLowFlow").onclick = () => {
     const g = Number(document.getElementById("lowGlucose").value);
-    const action = document.getElementById("lowAction").value;
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), { glucose:g, context:"low_sugar", action, alertLevel:"red", createdAt:serverTimestamp(), enteredBy:state.user.uid });
-    await createAlert("low","red",`Amara logged low glucose ${g}. Action: ${action}.`);
-    await unlockBadge("crimson-comeback");
-    restore();
-    toast("Low sugar check saved.");
-    renderFlowDone({
-      title:"Low sugar check saved",
-      message:"No insulin while low. Take fast sugar based on the family plan, tell an adult, and recheck.",
-      next:[
-        {view:"circle",title:"Call My Circle",sub:"Ask an adult to help."},
-        {view:"low",title:"Recheck Low Sugar",sub:"Log the next reading."},
-        {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
-      ]
-    });
+    if(!g || g < 20 || g > 600) return toast("Please enter a valid glucose number.");
+    state.lowFlow = { glucose:g, fastSugar:null, adult:null, recheck:null };
+    renderLowFastSugar();
   };
+}
+
+function renderLowFastSugar(){
+  const g = state.lowFlow?.glucose;
+  layout(`
+    <div class="card danger">
+      <h2>Low Sugar: ${g} mg/dL</h2>
+      <p><strong>No insulin now.</strong></p>
+      <p class="muted">Take fast sugar based on the family plan. Tell an adult.</p>
+    </div>
+    <div class="grid single">
+      <button class="action scarlet" data-fast="yes"><strong>Yes, I took fast sugar</strong><span>Juice, glucose tablets, candy, or plan-approved fast sugar.</span></button>
+      <button class="action" data-fast="not_yet"><strong>Not yet</strong><span>Show fast sugar choices.</span></button>
+      <button class="action danger-action" data-fast="weak"><strong>I cannot / I feel too weak</strong><span>Alert my Circle now.</span></button>
+    </div>
+  `, "home");
+  document.querySelectorAll("[data-fast]").forEach(btn => btn.onclick = async () => {
+    state.lowFlow.fastSugar = btn.dataset.fast;
+    if(btn.dataset.fast === "weak"){
+      await createAlert("low_too_weak","red",`Amara is low at ${g} and says she cannot or feels too weak.`);
+      return renderLowAdult();
+    }
+    if(btn.dataset.fast === "not_yet") return renderLowFastSugarChoices();
+    renderLowAdult();
+  });
+}
+
+function renderLowFastSugarChoices(){
+  layout(`
+    <div class="card danger">
+      <h2>Fast Sugar</h2>
+      <p class="muted">Choose what you took or will take based on the family plan.</p>
+    </div>
+    <div class="grid">
+      ${["Juice box","Glucose tablets","Regular soda","Candy","Honey","Other fast sugar"].map(x => `<button class="action" data-choice="${x}"><strong>${x}</strong><span>Save this choice.</span></button>`).join("")}
+    </div>
+  `, "home");
+  document.querySelectorAll("[data-choice]").forEach(btn => btn.onclick = () => {
+    state.lowFlow.fastSugar = btn.dataset.choice;
+    renderLowAdult();
+  });
+}
+
+function renderLowAdult(){
+  layout(`
+    <div class="card danger">
+      <h2>Tell an Adult</h2>
+      <p class="muted">An adult should know about a low sugar reading.</p>
+    </div>
+    <div class="grid single">
+      <button class="action scarlet" data-adult="yes"><strong>Adult knows</strong><span>Continue to recheck step.</span></button>
+      ${CIRCLE.map(n => `<button class="action" data-alert-adult="${n}"><strong>Alert ${n}</strong><span>Send alert to adult dashboard.</span></button>`).join("")}
+    </div>
+  `, "home");
+  document.querySelector("[data-adult='yes']").onclick = () => {
+    state.lowFlow.adult = "adult knows";
+    renderLowRecheck();
+  };
+  document.querySelectorAll("[data-alert-adult]").forEach(btn => btn.onclick = async () => {
+    const restore = setBusy(btn, "Sending alert…");
+    await createAlert("low_alert","red",`Amara is low at ${state.lowFlow.glucose}. Fast sugar: ${state.lowFlow.fastSugar || "not recorded"}. Alerted ${btn.dataset.alertAdult}.`);
+    restore();
+    toast(`${btn.dataset.alertAdult} alert saved.`);
+    state.lowFlow.adult = `alerted ${btn.dataset.alertAdult}`;
+    renderLowRecheck();
+  });
+}
+
+function renderLowRecheck(){
+  layout(`
+    <div class="card danger">
+      <h2>Recheck</h2>
+      <p class="muted">Recheck after fast sugar based on the family plan. If she feels worse, alert an adult now.</p>
+    </div>
+    <div class="grid single">
+      <button class="action scarlet" id="saveLowNow"><strong>Save low sugar check</strong><span>Save now and recheck later.</span></button>
+      <button class="action" id="recheckNow"><strong>I rechecked now</strong><span>Enter the new reading.</span></button>
+      <button class="action danger-action" id="feelWorse"><strong>I feel worse</strong><span>Alert the Circle.</span></button>
+    </div>
+  `, "home");
+  document.getElementById("saveLowNow").onclick = () => saveLowFlow(null);
+  document.getElementById("recheckNow").onclick = () => renderLowRecheckInput();
+  document.getElementById("feelWorse").onclick = async () => {
+    await createAlert("low_feels_worse","red",`Amara feels worse after low sugar ${state.lowFlow.glucose}.`);
+    saveLowFlow(null);
+  };
+}
+
+function renderLowRecheckInput(){
+  layout(`
+    <div class="card">
+      <h2>Recheck Reading</h2>
+      <div class="field"><label>New glucose mg/dL</label><input id="lowRecheckValue" type="number" inputmode="numeric" placeholder="Example: 82" /></div>
+      <button class="btn scarlet full" id="saveRecheck">Save recheck</button>
+    </div>
+  `, "home");
+  document.getElementById("saveRecheck").onclick = () => {
+    const r = Number(document.getElementById("lowRecheckValue").value);
+    if(!r || r < 20 || r > 600) return toast("Please enter a valid reading.");
+    saveLowFlow(r);
+  };
+}
+
+async function saveLowFlow(recheck){
+  const btn = document.querySelector("#saveLowNow, #saveRecheck, #feelWorse");
+  const restore = setBusy(btn, "Saving low sugar check…");
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), {
+    glucose:Number(state.lowFlow.glucose),
+    context:"low_sugar",
+    fastSugar:state.lowFlow.fastSugar || null,
+    adult:state.lowFlow.adult || null,
+    recheck:recheck || null,
+    alertLevel:"red",
+    createdAt:serverTimestamp(),
+    enteredBy:state.user.uid
+  });
+  if(Number(state.lowFlow.glucose) < state.settings.lowThreshold){
+    await createAlert("low","red",`Amara logged low glucose ${state.lowFlow.glucose}. Fast sugar: ${state.lowFlow.fastSugar || "not recorded"}. Adult: ${state.lowFlow.adult || "not recorded"}.`);
+  }
+  await unlockBadge("crimson-comeback");
+  restore();
+  toast("Low sugar check saved.");
+  renderFlowDone({
+    title:"Low sugar check saved",
+    message: recheck ? `Recheck saved: ${recheck} mg/dL. No insulin was logged.` : "No insulin was logged. Recheck based on the family plan.",
+    next:[
+      {view:"circle",title:"Call My Circle",sub:"Ask an adult to help."},
+      {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
+    ]
+  });
 }
 
 function renderInsulinLog(){
@@ -1468,7 +1570,8 @@ function renderCircle(){
       title:`${who} alert saved`,
       message:"Your Circle has been alerted in the adult dashboard.",
       next:[
-        {view:"high",title:"Log Glucose",sub:"Use this if sugar is high."},
+        {view:"home",title:"Back Home",sub:"Return to the main screen."},
+        {view:"high",title:"Check My Sugar",sub:"Use this if you need to log a reading."},
         {view:"diary",title:"Write a Scarlet Entry",sub:"Say what you need to say."}
       ]
     });
@@ -1694,7 +1797,8 @@ function renderAdult(){
       </div>
       <div class="card">
         <h3>Reports</h3>
-        <p class="muted small">7-day and 14-day summaries are now available from the Reports tab. Use them for checkups and pattern review.</p>
+        <p class="muted small">7-day and 14-day summaries are available for adult pattern review.</p>
+        <button class="btn scarlet full" style="margin-top:12px" id="openReportsBtn">Open Reports</button>
       </div>
       <div class="card danger">
         <h3>Demo Tools</h3>
@@ -1717,6 +1821,8 @@ function renderAdult(){
   bindGlobal();
   const resetBtn = document.getElementById("resetDemoBtn");
   if(resetBtn) resetBtn.onclick = () => renderDemoReset();
+  const openReportsBtn = document.getElementById("openReportsBtn");
+  if(openReportsBtn) openReportsBtn.onclick = () => renderReports();
 
   const alertsRef = collection(db,"families",FAMILY_ID,"alerts");
   onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {

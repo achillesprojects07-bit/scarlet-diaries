@@ -701,3 +701,45 @@ button.added,
 .food-card .btn{
   min-width:88px;
 }
+
+
+/* V2.4 consolidated flow repair */
+.estimate-hero{
+  text-align:center;
+  border:2px solid rgba(192,57,43,.48);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(192,57,43,.24), transparent 38%),
+    linear-gradient(180deg, rgba(42,18,24,.98), rgba(15,7,11,.98));
+}
+.estimate-hero h2{
+  margin-top:10px;
+  color:var(--ivory);
+}
+.dose-number{
+  font-family:'Cinzel', serif;
+  font-size:72px;
+  line-height:.95;
+  color:#fff8ef;
+  text-shadow:0 0 28px rgba(192,57,43,.65);
+  margin-top:12px;
+}
+.dose-unit{
+  color:var(--scarlet2);
+  font-weight:900;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  margin-bottom:10px;
+}
+.danger-action{
+  border-color:rgba(189,30,50,.5) !important;
+  background:rgba(189,30,50,.14) !important;
+}
+.success{
+  border-left:5px solid var(--green);
+}
+.meal-summary-sticky{
+  top:4px;
+}
+@media (max-width:430px){
+  .dose-number{font-size:64px}
+}

@@ -1,34 +1,49 @@
-# The Scarlet Diaries — V2.3 300 Food Database Build
+# The Scarlet Diaries — V2.4 Consolidated Flow Repair Build
 
-This build expands the food database and cleans up the Before I Eat flow.
+This build keeps all previous features and repairs the major flow issues.
 
-## Added
+## Included from previous builds
 
-- `foods.json` now has **300 food and drink items**
-- Amara’s favorites are prioritized:
-  - Breakfast Favorites
-  - Meal Favorites
-- Added **All** category
-- Search is now always visible in Before I Eat
-- Search works by first letter or word:
-  - `r`
-  - `rice`
-  - `pit`
-  - `milk`
-- Portions are now measurable instead of vague Small/Usual/Large:
-  - 1/4 cup
-  - 1/2 cup
-  - 1 cup
-  - 1 tablespoon
-  - 1 teaspoon
-  - 1 slice
-  - 1 piece
-  - 1 pack
-  - 1 bottle
-- Hidden carbs no longer appears as the main top action when the meal is empty
-- Hidden carbs appears after food is added
-- Continue button replaces “Next: Hidden Carbs”
+- Login and role selection
+- Firebase Auth / Firestore
+- Profile repair
+- Adult dashboard
+- Demo reset
+- 300-food foods.json database
+- Breakfast Favorites and Meal Favorites
+- Scarlet Entry
+- My Scarlet Pages
+- Scarlet Vault
+- Reports
+- Before I Eat
+- High Sugar
+- Low Sugar
+- Call My Circle
+- Symptoms / Mood
+- Alerts
 
-## Food source note
+## V2.4 repairs
 
-This is a curated app-ready starter database. It is not a raw full USDA dump because the full dataset is too large and not child-friendly without cleaning.
+### Before I Eat
+- Better food UX
+- Back buttons inside food flow
+- After adding food, screen goes to Meal So Far
+- Hidden carbs only after food is added
+- Calculation screen jumps to a big highlighted Suggested Apidra card
+- Adult Confirmed auto-saves meal and logs Apidra
+- No Reports button after meal/insulin save
+
+### Low Sugar
+- Rebuilt from confusing dropdown into guided steps
+
+### High Sugar
+- Rebuilt guided flow with ketone check, symptoms check, recent Apidra check, and no correction suggestion if recent Apidra/unsure
+
+### Reports
+- Reports has a Back button
+- Adult dashboard has an Open Reports button
+- Reports errors now show a clear message instead of seeming frozen
+
+### Buttons
+- Buttons visibly press/move
+- Saving/Adding/Sending feedback retained
