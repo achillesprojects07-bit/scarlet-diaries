@@ -1,46 +1,34 @@
-# The Scarlet Diaries — V1.4
+# The Scarlet Diaries — V1.5
 
-**Phase 1 + Phase 2 Build**
+Phase 3 + Phase 4 build using the uploaded `index_v2` visual direction.
 
-This build combines the working foundation with the first safety layer.
+## Visual/Login updates
+- Dark vampire-style login based on the uploaded index_v2 design
+- Role selection: Amara, Mom, Dad, Tita
+- Email/password after role selection
+- Unlock the Diary button
+- Very small Create account link
+- Small visible V1.5 text
+- Fonts adjusted: Cinzel only for The Scarlet Diaries / Hello Amara / Vault-style headings; Lato for readable app text
 
-## Phase 1 included
+## Phase 3: Food + Carb Database
+- Food & Carb Library added to Home
+- Family Verified foods
+- Filipino and Greek starter foods
+- Custom family food entry
+- Hidden/secret carbs checklist retained
+- Open Food Facts packaged-food search
+- Confidence labels
+- Meal builder can add local foods or database foods
 
-- Firebase web app connection
-- Firebase Authentication login
-- Child view for Amara
-- Adult dashboard for Mom / Dad / Tita
-- Firestore data saving
-- Starter settings
-- Starter food list
-- Meal Mode
-- Carb ratio: 1 unit per 8g carbs
-- Dose rounding: nearest 1 unit
-- Pre-meal glucose required
-- Scarlet Entry
-- Scarlet Vault
-- Small visible build text: V1.4
+## Phase 4: Scarlet Diary + Emotional Support
+- Write a Scarlet Entry expanded with prompts
+- Mood tracker
+- Private / Share with Circle / Safety note options
+- Mood Mirror added to Home
+- Mood logs saved
+- Badge expansion for family foods and emotional courage
 
-## Phase 2 included
-
-- High Sugar Mode
-- Low Sugar Mode
-- Ketone prompt at high glucose
-- No strips option
-- Moderate / large ketone emergency screen
-- “I am alone” alert record
-- “I already injected” alert record
-- Insulin log
-- Apidra correction alert record
-- Insulin stacking warning question
-- Symptoms check
-- Emergency symptom alert record
-- Parent dashboard alert feed
-- Stronger safety wording
-- Large iPhone / Pro Max UI tuning
-
-## Important
-
-Alert records are saved in Firestore and shown in the adult dashboard. Actual email sending requires the next backend notification step using Cloud Functions or another provider.
-
-The app is a family safety assistant. It is not a medical prescription.
+## Still not included
+- Actual email sending; alert records are saved in Firebase and shown in the adult dashboard.
+- USDA FoodData Central key-based search; this can be added later when we set an API key.

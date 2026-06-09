@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.4";
+const BUILD = "V1.5";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -41,6 +41,7 @@ const STARTER_FOODS = [
   { name:"White rice", category:"Filipino", portion:"1 cup cooked", carbs:45, calories:205, source:"Family starter", confidence:"Medium", hidden:false },
   { name:"Pandesal", category:"Filipino", portion:"1 piece", carbs:15, calories:120, source:"Estimate", confidence:"Low", hidden:false },
   { name:"Filipino spaghetti", category:"Filipino", portion:"1 cup", carbs:43, calories:310, source:"Estimate", confidence:"Low", hidden:true },
+  { name:"Adobo sauce", category:"Filipino", portion:"2 tbsp", carbs:4, calories:35, source:"Estimate", confidence:"Low", hidden:true },
   { name:"Fried chicken breading", category:"Hidden carbs", portion:"small serving", carbs:8, calories:60, source:"Estimate", confidence:"Low", hidden:true },
   { name:"Sweet sauce / ketchup", category:"Hidden carbs", portion:"1 tbsp", carbs:5, calories:20, source:"Estimate", confidence:"Low", hidden:true },
   { name:"Juice box", category:"Drinks", portion:"1 box", carbs:20, calories:90, source:"Label estimate", confidence:"Medium", hidden:false },
@@ -50,6 +51,7 @@ const STARTER_FOODS = [
   { name:"Greek yogurt plain", category:"Greek", portion:"170g", carbs:6, calories:100, source:"Generic", confidence:"Medium", hidden:false },
   { name:"Honey", category:"Greek", portion:"1 tbsp", carbs:17, calories:64, source:"Generic", confidence:"Medium", hidden:true },
   { name:"Spanakopita", category:"Greek", portion:"1 piece", carbs:28, calories:290, source:"Estimate", confidence:"Low", hidden:true },
+  { name:"Souvlaki with pita", category:"Greek", portion:"1 serving", carbs:38, calories:420, source:"Estimate", confidence:"Low", hidden:true }
 ];
 
 const BADGES = [
@@ -61,6 +63,7 @@ const BADGES = [
   { id:"crimson-comeback", section:"The Lowlight", name:"The Crimson Comeback", desc:"You fell low, but you rose again.", rule:"Treat and recheck a low sugar." },
   { id:"hidden-carb-hunter", section:"Secrets of the Plate", name:"The Hidden Carb Hunter", desc:"You found what the meal tried to hide.", rule:"Use the secret carbs checklist." },
   { id:"feast-reader", section:"Secrets of the Plate", name:"The Feast Reader", desc:"You read the plate like a secret map.", rule:"Complete a meal calculation." },
+  { id:"family-food-keeper", section:"Secrets of the Plate", name:"The Family Food Keeper", desc:"You saved a food your real life understands.", rule:"Save a custom family food." },
   { id:"ketone-seer", section:"The Dark Signals", name:"The Ketone Seer", desc:"You read the warning signs.", rule:"Check ketones during a high sugar day." },
   { id:"truth-keeper", section:"The Dark Signals", name:"The Truth Keeper", desc:"You told the truth, and the Circle can help.", rule:"Log that ketone strips are missing or unavailable." },
   { id:"caller-circle", section:"The Circle", name:"Caller of the Circle", desc:"You were brave enough to call your guardians.", rule:"Ask Mom, Dad, or Tita for help." },
@@ -72,10 +75,12 @@ const BADGES = [
 let state = {
   user:null,
   role:null,
+  selectedRole:"",
   settings: DEFAULT_SETTINGS,
   foods: STARTER_FOODS,
   unlockedBadges: new Set(),
   view:"home",
+  foodTab:"family",
   meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" }
 };
 
@@ -84,7 +89,6 @@ const $app = document.getElementById("app");
 function esc(str){
   return String(str ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 }
-
 function toast(msg){
   const old = document.querySelector(".toast");
   if(old) old.remove();
@@ -92,7 +96,14 @@ function toast(msg){
   div.className = "toast";
   div.textContent = msg;
   document.body.appendChild(div);
-  setTimeout(()=>div.remove(), 2800);
+  setTimeout(()=>div.remove(), 3000);
+}
+
+function roleToStoredRole(role){
+  return role === "amara" ? "child" : "adult";
+}
+function roleTitle(role){
+  return ({ amara:"🩸 Welcome, Amara", mom:"🌙 Welcome, Mom", dad:"⚡ Welcome, Dad", tita:"🔮 Welcome, Tita" })[role] || "Enter Your Details";
 }
 
 function render(){
@@ -107,8 +118,129 @@ function render(){
     case "diary": return renderDiary();
     case "vault": return renderVault();
     case "circle": return renderCircle();
+    case "foods": return renderFoodLibrary();
+    case "mood": return renderMoodMirror();
     default: return renderHome();
   }
+}
+
+function renderLogin(){
+  $app.innerHTML = `
+    <section class="screen center">
+      <div class="app-wrapper">
+        <div class="header">
+          <div class="scarlet-drop"></div>
+          <div class="app-title">The Scarlet <span>Diaries</span></div>
+          <div class="divider"></div>
+          <div class="tagline">Every drop. Every breath. Unstoppable.</div>
+          <div class="build-tag">${BUILD}</div>
+        </div>
+
+        <div class="login-card">
+          <div id="roleSelection">
+            <div class="login-prompt">Who are you?</div>
+            <div class="role-buttons">
+              <button class="role-btn amara" data-role="amara"><span class="role-icon">🩸</span> I am Amara</button>
+              <button class="role-btn circle" data-role="mom"><span class="role-icon">🌙</span> I am Mom</button>
+              <button class="role-btn circle" data-role="dad"><span class="role-icon">⚡</span> I am Dad</button>
+              <button class="role-btn circle" data-role="tita"><span class="role-icon">🔮</span> I am Tita</button>
+            </div>
+          </div>
+
+          <div class="auth-form" id="authForm">
+            <div class="form-title" id="formTitle">Enter Your Details</div>
+            <div class="error-msg" id="errorMsg"></div>
+            <input type="email" class="form-input" id="emailInput" placeholder="Email address" autocomplete="email" />
+            <input type="password" class="form-input" id="passwordInput" placeholder="Password" autocomplete="current-password" />
+            <button class="submit-btn" id="loginBtn"><span>🗝</span> Unlock the Diary</button>
+            <button class="back-btn" id="backBtn">← Choose a different role</button>
+            <button class="create-small" id="createBtn">Create account</button>
+          </div>
+        </div>
+
+        <div class="footer">The Scarlet Diaries · Private &amp; Protected</div>
+      </div>
+    </section>
+  `;
+
+  document.querySelectorAll("[data-role]").forEach(btn => btn.onclick = () => {
+    state.selectedRole = btn.dataset.role;
+    document.getElementById("roleSelection").style.display = "none";
+    document.getElementById("authForm").classList.add("visible");
+    document.getElementById("formTitle").textContent = roleTitle(state.selectedRole);
+    hideError();
+  });
+  document.getElementById("backBtn").onclick = () => {
+    state.selectedRole = "";
+    document.getElementById("roleSelection").style.display = "block";
+    document.getElementById("authForm").classList.remove("visible");
+    hideError();
+  };
+  document.getElementById("loginBtn").onclick = () => doLogin(false);
+  document.getElementById("createBtn").onclick = () => doLogin(true);
+  document.getElementById("passwordInput").onkeydown = (e) => {
+    if(e.key === "Enter") doLogin(false);
+  };
+}
+function showError(msg){
+  const el = document.getElementById("errorMsg");
+  if(!el) return toast(msg);
+  el.textContent = msg;
+  el.classList.add("visible");
+}
+function hideError(){
+  const el = document.getElementById("errorMsg");
+  if(el) el.classList.remove("visible");
+}
+
+async function doLogin(create=false){
+  const email = document.getElementById("emailInput").value.trim();
+  const pass = document.getElementById("passwordInput").value;
+  const roleKey = state.selectedRole || "amara";
+  const role = roleToStoredRole(roleKey);
+  if(!email || !pass) return showError("Please enter your email and password.");
+  try{
+    const cred = create
+      ? await createUserWithEmailAndPassword(auth, email, pass)
+      : await signInWithEmailAndPassword(auth, email, pass);
+    state.role = role;
+    localStorage.setItem("scarletRole", role);
+    localStorage.setItem("scarletRoleKey", roleKey);
+    await setDoc(doc(db,"users",cred.user.uid), {
+      email, role, roleKey, familyId:FAMILY_ID, displayName: role === "child" ? "Amara" : roleKey,
+      active:true, updatedAt:serverTimestamp()
+    }, { merge:true });
+    await ensureDefaults();
+  }catch(err){
+    console.error(err);
+    if(err.code === "auth/invalid-email") showError("Please enter a valid email address.");
+    else if(err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") showError("Incorrect email or password. Try again.");
+    else showError(err.message || "Something went wrong. Please try again.");
+  }
+}
+
+async function ensureDefaults(){
+  const settingsRef = doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current");
+  const snap = await getDoc(settingsRef);
+  if(!snap.exists()) await setDoc(settingsRef, { ...DEFAULT_SETTINGS, updatedAt: serverTimestamp() });
+  for(const food of STARTER_FOODS){
+    const foodId = food.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+    await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",foodId), {
+      ...food, familyId:FAMILY_ID, verified: food.source === "Family starter", active:true, updatedAt: serverTimestamp()
+    }, { merge:true });
+  }
+  for(const badge of BADGES) await setDoc(doc(db,"families",FAMILY_ID,"badges",badge.id), badge, { merge:true });
+}
+
+async function loadData(){
+  try{
+    const settingsSnap = await getDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"));
+    if(settingsSnap.exists()) state.settings = { ...DEFAULT_SETTINGS, ...settingsSnap.data() };
+    const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
+    if(!foodsSnap.empty) state.foods = foodsSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+    const unlockSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
+    state.unlockedBadges = new Set(unlockSnap.docs.map(d => d.id));
+  }catch(err){ console.warn("Data load issue:", err); }
 }
 
 function layout(content, active="home"){
@@ -116,9 +248,9 @@ function layout(content, active="home"){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small">SD</div>
-          <div>
-            <strong>${APP_NAME}</strong>
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title">
+            <strong>The Scarlet Diaries</strong>
             <p class="small muted">Every drop. Every breath. Unstoppable.</p>
           </div>
         </div>
@@ -131,6 +263,7 @@ function layout(content, active="home"){
       <nav class="nav">
         <button class="${active==="home"?"active":""}" data-view="home">Home</button>
         <button class="${active==="meal"?"active":""}" data-view="meal">Meal</button>
+        <button class="${active==="foods"?"active":""}" data-view="foods">Foods</button>
         <button class="${active==="diary"?"active":""}" data-view="diary">Entry</button>
         <button class="${active==="vault"?"active":""}" data-view="vault">Vault</button>
       </nav>
@@ -138,115 +271,18 @@ function layout(content, active="home"){
   `;
   bindGlobal();
 }
-
 function bindGlobal(){
-  document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => {
-    state.view = btn.dataset.view;
-    render();
-  });
+  document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => { state.view = btn.dataset.view; render(); });
   const logoutBtn = document.querySelector("[data-action='logout']");
   if(logoutBtn) logoutBtn.onclick = () => signOut(auth);
-}
-
-function renderLogin(){
-  $app.innerHTML = `
-    <section class="screen center">
-      <div class="front-cover">
-        <div class="cover-locket">
-          <div class="brand-locket">SD</div>
-        </div>
-        <h1>The Scarlet Diaries</h1>
-        <p class="tagline">Every drop. Every breath. Unstoppable.</p>
-        <div class="subtle-divider"></div>
-        <p class="build-tag" style="margin-top:10px">${BUILD}</p>
-        <p class="muted small" style="margin-top:14px">A private safety diary for Amara.</p><p class="muted small">Phase 1 + 2 safety build.</p>
-
-        <div class="field" style="margin-top:18px;text-align:left">
-          <label>Email</label>
-          <input id="email" type="email" placeholder="amara@example.com" autocomplete="email" />
-        </div>
-        <div class="field" style="text-align:left">
-          <label>Password</label>
-          <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
-        </div>
-        <div class="field" style="text-align:left">
-          <label>Who is using this?</label>
-          <select id="role">
-            <option value="child">Amara</option>
-            <option value="adult">Mom / Dad / Tita</option>
-          </select>
-        </div>
-        <button class="unlock-btn" id="loginBtn"><span class="key-inline">🗝</span>Unlock the Diary</button>
-        <div class="btn-row" style="justify-content:center;margin-top:10px">
-          <button class="btn secondary" id="createBtn">Create account</button>
-        </div>
-      </div>
-    </section>
-  `;
-  document.getElementById("loginBtn").onclick = async () => doLogin(false);
-  document.getElementById("createBtn").onclick = async () => doLogin(true);
-}
-
-async function doLogin(create=false){
-  const email = document.getElementById("email").value.trim();
-  const pass = document.getElementById("password").value;
-  const role = document.getElementById("role").value;
-  if(!email || !pass) return toast("Please enter email and password.");
-  try{
-    const cred = create
-      ? await createUserWithEmailAndPassword(auth, email, pass)
-      : await signInWithEmailAndPassword(auth, email, pass);
-    state.role = role;
-    localStorage.setItem("scarletRole", role);
-    await setDoc(doc(db,"users",cred.user.uid), {
-      email, role, familyId:FAMILY_ID, displayName: role==="child" ? "Amara" : "Adult Circle",
-      active:true, updatedAt:serverTimestamp()
-    }, { merge:true });
-    await ensureDefaults();
-  }catch(err){
-    console.error(err);
-    toast(err.message || "Login failed.");
-  }
-}
-
-async function ensureDefaults(){
-  const settingsRef = doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current");
-  const snap = await getDoc(settingsRef);
-  if(!snap.exists()){
-    await setDoc(settingsRef, { ...DEFAULT_SETTINGS, updatedAt: serverTimestamp() });
-  }
-  for(const food of STARTER_FOODS){
-    const foodId = food.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
-    await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",foodId), {
-      ...food, familyId:FAMILY_ID, verified:false, active:true, updatedAt: serverTimestamp()
-    }, { merge:true });
-  }
-  for(const badge of BADGES){
-    await setDoc(doc(db,"families",FAMILY_ID,"badges",badge.id), badge, { merge:true });
-  }
-}
-
-async function loadData(){
-  try{
-    const settingsSnap = await getDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"));
-    if(settingsSnap.exists()) state.settings = { ...DEFAULT_SETTINGS, ...settingsSnap.data() };
-
-    const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(80)));
-    if(!foodsSnap.empty) state.foods = foodsSnap.docs.map(d => ({ id:d.id, ...d.data() }));
-
-    const unlockSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
-    state.unlockedBadges = new Set(unlockSnap.docs.map(d => d.id));
-  }catch(err){
-    console.warn("Data load issue:", err);
-  }
 }
 
 function renderHome(){
   layout(`
     <div class="card dark">
       <p class="pill">Amara’s private safety diary</p>
-      <h2 style="margin-top:12px">Hello, Amara.</h2>
-      <p class="tagline" style="color:var(--gold-2)">What does your body need?</p>
+      <h2 class="hello-title" style="margin-top:12px">Hello, Amara.</h2>
+      <p class="tagline" style="text-align:left;margin-top:4px">What does your body need?</p>
     </div>
     <div class="card">
       <h3>Safety first</h3>
@@ -258,8 +294,10 @@ function renderHome(){
       <button class="action" data-go="low"><strong>My Sugar Is Low</strong><span>No insulin now. Protect yourself first.</span></button>
       <button class="action" data-go="insulin"><strong>I Took Insulin</strong><span>Log Apidra or Lantus.</span></button>
       <button class="action" data-go="feel"><strong>I Don’t Feel Well</strong><span>Tell the diary what your body feels.</span></button>
+      <button class="action" data-go="foods"><strong>Food & Carb Library</strong><span>Family foods, Filipino, Greek, and database search.</span></button>
       <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Give your feelings a place to go.</span></button>
       <button class="action plum" data-go="vault"><strong>Open The Scarlet Vault</strong><span>Proof that you kept going.</span></button>
+      <button class="action" data-go="mood"><strong>Mood Mirror</strong><span>See feelings without shame.</span></button>
       <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
     </div>
   `, "home");
@@ -311,7 +349,7 @@ function renderKetonePrompt(next="meal"){
     <div class="card ${g>=state.settings.urgentHighThreshold ? "danger":"warning"}">
       <h2>${g>=state.settings.urgentHighThreshold ? "Very high sugar" : "High sugar"}</h2>
       <p class="muted">High sugar can leave warning signs. Let’s check if we can.</p>
-      <div class="divider"></div>
+      <div class="divider-line"></div>
       <p><strong>Glucose:</strong> ${g} mg/dL</p>
       <p class="small muted">Please check ketones if strips are available. Tell your Circle now. If there are no strips, log it honestly so adults can help.</p>
     </div>
@@ -333,10 +371,21 @@ function renderKetonePrompt(next="meal"){
   });
 }
 
+function foodConfidence(f){
+  if(f.verified || f.source === "Family Verified") return "High confidence";
+  if((f.source || "").includes("Open Food Facts") || (f.source || "").includes("Label")) return "High confidence";
+  if((f.source || "").includes("Generic")) return "Medium confidence";
+  return `${f.confidence || "Low"} confidence`;
+}
+
 function renderFoodBuilder(){
   const itemsHtml = state.meal.items.map((it,i)=>`
     <div class="list-item">
-      <div><strong>${esc(it.name)}</strong><span class="small muted">${esc(it.portion)} · ${it.carbs}g carbs</span></div>
+      <div>
+        <strong>${esc(it.name)}</strong>
+        <span class="small muted">${esc(it.portion)} · ${it.carbs}g carbs</span>
+        <div class="confidence">${esc(foodConfidence(it))}</div>
+      </div>
       <button class="btn secondary" data-remove="${i}">Remove</button>
     </div>
   `).join("") || `<p class="muted small">No foods added yet.</p>`;
@@ -345,45 +394,164 @@ function renderFoodBuilder(){
   layout(`
     <div class="card">
       <h2>Add Food</h2>
-      <p class="muted">Choose from the starter Filipino, Greek, and family food list. Database search comes in Phase 3.</p>
+      <p class="muted">Family verified foods appear first. Database search is available for packaged food names.</p>
+      <div class="food-source-tabs">
+        <button class="tab-btn ${state.foodTab==="family"?"active":""}" data-tab="family">Family/Favorites</button>
+        <button class="tab-btn ${state.foodTab==="database"?"active":""}" data-tab="database">Database Search</button>
+      </div>
       <div class="field">
         <label>Search food</label>
-        <input id="foodSearch" placeholder="rice, pita, juice…" />
+        <input id="foodSearch" placeholder="rice, pita, juice, cereal…" />
       </div>
       <div id="foodResults" class="list"></div>
+      <button class="btn secondary full" id="customFood">Add custom family food</button>
     </div>
     <div class="card">
       <h3>Meal so far</h3>
       <div class="list">${itemsHtml}</div>
-      <div class="divider"></div>
+      <div class="divider-line"></div>
       <div class="kv"><span>Total carbs</span><strong>${total}g</strong></div>
       <button class="btn scarlet full" id="hiddenCarbs">Check secret carbs</button>
     </div>
   `, "meal");
 
+  document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => { state.foodTab = btn.dataset.tab; renderFoodBuilder(); });
   const input = document.getElementById("foodSearch");
   const results = document.getElementById("foodResults");
-  const draw = () => {
+
+  async function draw(){
     const term = input.value.toLowerCase().trim();
-    const foods = state.foods.filter(f => !term || `${f.name} ${f.category}`.toLowerCase().includes(term)).slice(0,8);
-    results.innerHTML = foods.map((f,i)=>`
-      <button class="action" data-food="${i}">
-        <strong>${esc(f.name)}</strong>
-        <span>${esc(f.portion)} · ${Number(f.carbs||0)}g carbs · ${esc(f.confidence || "Estimate")}</span>
-      </button>
-    `).join("");
-    results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => {
-      state.meal.items.push(foods[Number(btn.dataset.food)]);
-      renderFoodBuilder();
-    });
-  };
+    if(state.foodTab === "database" && term.length >= 3){
+      results.innerHTML = `<p class="muted small">Searching packaged food database…</p>`;
+      const dbFoods = await searchOpenFoodFacts(term);
+      if(!dbFoods.length){
+        results.innerHTML = `<p class="muted small">No packaged results found. Try a simpler name or add custom family food.</p>`;
+        return;
+      }
+      results.innerHTML = dbFoods.map((f,i)=>foodButtonHtml(f,i)).join("");
+      results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => { state.meal.items.push(dbFoods[Number(btn.dataset.food)]); renderFoodBuilder(); });
+      return;
+    }
+
+    const foods = state.foods
+      .filter(f => !term || `${f.name} ${f.category}`.toLowerCase().includes(term))
+      .sort((a,b) => Number(!!b.verified) - Number(!!a.verified))
+      .slice(0,10);
+    results.innerHTML = foods.map((f,i)=>foodButtonHtml(f,i)).join("") || `<p class="muted small">No food found. Add custom family food.</p>`;
+    results.querySelectorAll("[data-food]").forEach(btn => btn.onclick = () => { state.meal.items.push(foods[Number(btn.dataset.food)]); renderFoodBuilder(); });
+  }
   input.oninput = draw; draw();
 
-  document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => {
-    state.meal.items.splice(Number(btn.dataset.remove),1);
-    renderFoodBuilder();
-  });
+  document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => { state.meal.items.splice(Number(btn.dataset.remove),1); renderFoodBuilder(); });
   document.getElementById("hiddenCarbs").onclick = renderHiddenCarbs;
+  document.getElementById("customFood").onclick = () => renderCustomFoodForm("meal");
+}
+
+function foodButtonHtml(f,i){
+  return `<button class="action" data-food="${i}">
+    <strong>${esc(f.name)}</strong>
+    <span>${esc(f.portion || "serving")} · ${Number(f.carbs||0)}g carbs · ${esc(f.calories || 0)} kcal</span>
+    <span class="confidence">${esc(foodConfidence(f))}</span>
+  </button>`;
+}
+
+async function searchOpenFoodFacts(term){
+  try{
+    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=8`;
+    const res = await fetch(url);
+    if(!res.ok) return [];
+    const data = await res.json();
+    return (data.products || []).map(p => {
+      const n = p.nutriments || {};
+      const carbs100 = Number(n.carbohydrates_100g || n.carbohydrates || 0);
+      const kcal100 = Number(n["energy-kcal_100g"] || n["energy-kcal"] || 0);
+      return {
+        name: p.product_name || p.generic_name || "Packaged food",
+        category: "Packaged",
+        portion: "100g / label estimate",
+        carbs: Math.round(carbs100),
+        calories: Math.round(kcal100),
+        source: "Open Food Facts",
+        confidence: "High",
+        hidden:false,
+        verified:false
+      };
+    }).filter(f => f.name && f.carbs >= 0);
+  }catch(err){
+    console.warn("Open Food Facts search failed", err);
+    return [];
+  }
+}
+
+function renderFoodLibrary(){
+  layout(`
+    <div class="card dark">
+      <h2>Food & Carb Library</h2>
+      <p class="tagline">Family foods first. Database second.</p>
+      <p class="muted small" style="margin-top:8px">Insulin is calculated from total carbs. Calories are shown only for nutrition context.</p>
+    </div>
+    <div class="card">
+      <button class="btn scarlet full" id="addCustomFood">Add custom family food</button>
+      <div class="divider-line"></div>
+      <div class="list">
+        ${state.foods.slice().sort((a,b)=>Number(!!b.verified)-Number(!!a.verified)).slice(0,40).map(f => `
+          <div class="list-item">
+            <div>
+              <strong>${esc(f.name)}</strong>
+              <span class="small muted">${esc(f.category)} · ${esc(f.portion)} · ${Number(f.carbs||0)}g carbs</span>
+              <div class="confidence">${esc(foodConfidence(f))}</div>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `, "foods");
+  document.getElementById("addCustomFood").onclick = () => renderCustomFoodForm("library");
+}
+
+function renderCustomFoodForm(returnTo="library"){
+  layout(`
+    <div class="card">
+      <h2>Add Family Food</h2>
+      <p class="muted">Use this for meals Amara actually eats. These become easier to find next time.</p>
+      <div class="field"><label>Food name</label><input id="customName" placeholder="Example: Mom's rice bowl" /></div>
+      <div class="field"><label>Category</label><input id="customCategory" placeholder="Filipino, Greek, School snack…" /></div>
+      <div class="field"><label>Portion</label><input id="customPortion" placeholder="1 cup, 1 piece, 1 pack…" /></div>
+      <div class="field"><label>Total carbs</label><input id="customCarbs" type="number" inputmode="numeric" placeholder="grams" /></div>
+      <div class="field"><label>Calories</label><input id="customCalories" type="number" inputmode="numeric" placeholder="optional" /></div>
+      <button class="btn scarlet full" id="saveCustomFood">Save as family food</button>
+      <button class="btn secondary full" id="cancelCustomFood">Cancel</button>
+    </div>
+  `, "foods");
+  document.getElementById("cancelCustomFood").onclick = () => returnTo === "meal" ? renderFoodBuilder() : renderFoodLibrary();
+  document.getElementById("saveCustomFood").onclick = async () => {
+    const f = {
+      name: document.getElementById("customName").value.trim(),
+      category: document.getElementById("customCategory").value.trim() || "Family",
+      portion: document.getElementById("customPortion").value.trim() || "1 serving",
+      carbs: Number(document.getElementById("customCarbs").value),
+      calories: Number(document.getElementById("customCalories").value || 0),
+      source: "Family Verified",
+      confidence: "High",
+      verified:true,
+      hidden:false,
+      active:true,
+      familyId:FAMILY_ID,
+      updatedAt: serverTimestamp()
+    };
+    if(!f.name || isNaN(f.carbs)) return toast("Please enter food name and carbs.");
+    const id = f.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now().toString().slice(-5);
+    await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",id), f);
+    state.foods.unshift({ id, ...f });
+    await unlockBadge("family-food-keeper");
+    toast("Family food saved.");
+    if(returnTo === "meal"){
+      state.meal.items.push(f);
+      renderFoodBuilder();
+    }else{
+      showBadgeModal("family-food-keeper", () => renderFoodLibrary());
+    }
+  };
 }
 
 function renderHiddenCarbs(){
@@ -398,22 +566,11 @@ function renderHiddenCarbs(){
     </div>
     <button class="btn scarlet full" id="finishHidden">Done checking secret carbs</button>
   `, "meal");
-  document.querySelectorAll("[data-secret]").forEach(btn => btn.onclick = () => {
-    btn.classList.toggle("scarlet");
-    state.meal.hiddenChecked = true;
-  });
-  document.getElementById("finishHidden").onclick = async () => {
-    state.meal.hiddenChecked = true;
-    await unlockBadge("hidden-carb-hunter");
-    renderMealEstimate();
-  };
+  document.querySelectorAll("[data-secret]").forEach(btn => btn.onclick = () => { btn.classList.toggle("scarlet"); state.meal.hiddenChecked = true; });
+  document.getElementById("finishHidden").onclick = async () => { state.meal.hiddenChecked = true; await unlockBadge("hidden-carb-hunter"); renderMealEstimate(); };
 }
 
-function roundDose(raw){
-  const unit = Number(state.settings.doseRounding || 1);
-  return Math.round(raw / unit) * unit;
-}
-
+function roundDose(raw){ const unit = Number(state.settings.doseRounding || 1); return Math.round(raw / unit) * unit; }
 function getCorrection(glucose){
   if(glucose > 250) return Number(state.settings.preMealCorrection250 || 4);
   if(glucose > 180) return Number(state.settings.preMealCorrection180 || 2);
@@ -429,7 +586,7 @@ function renderMealEstimate(){
     <div class="card dark">
       <p class="pill">Estimated dose, not a command</p>
       <h2 style="margin-top:10px">Estimated Apidra: ${estimated} units</h2>
-      <p class="tagline" style="color:var(--gold-2)">Show this to your Circle before injecting.</p>
+      <p class="tagline" style="text-align:left;margin-top:6px">Show this to your Circle before injecting.</p>
     </div>
     <div class="card">
       <div class="kv"><span>Pre-meal glucose</span><strong>${state.meal.glucose} mg/dL</strong></div>
@@ -448,15 +605,8 @@ function renderMealEstimate(){
     </div>
   `, "meal");
   document.getElementById("adultConfirmed").onclick = () => saveMealLog({ adultConfirmed:true, actualDose:estimated });
-  document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => {
-    await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Estimated Apidra: ${estimated} units.`);
-    await unlockBadge("caller-circle");
-    toast(`${b.dataset.call} alert saved.`);
-  });
-  document.getElementById("alone").onclick = async () => {
-    await createAlert("alone","red",`Amara says she is alone during meal dosing. Estimated Apidra: ${estimated} units.`);
-    toast("The Circle has been alerted.");
-  };
+  document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => { await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Estimated Apidra: ${estimated} units.`); await unlockBadge("caller-circle"); toast(`${b.dataset.call} alert saved.`); });
+  document.getElementById("alone").onclick = async () => { await createAlert("alone","red",`Amara says she is alone during meal dosing. Estimated Apidra: ${estimated} units.`); toast("The Circle has been alerted."); };
   document.getElementById("injected").onclick = () => saveMealLog({ adultConfirmed:false, actualDose:estimated, alreadyInjected:true });
 }
 
@@ -469,11 +619,9 @@ async function saveMealLog(extra={}){
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs"), {
     mealType: state.meal.type,
     glucoseBeforeMeal: Number(state.meal.glucose),
-    items: state.meal.items.map(x => ({ name:x.name, portion:x.portion, carbs:Number(x.carbs||0) })),
+    items: state.meal.items.map(x => ({ name:x.name, portion:x.portion, carbs:Number(x.carbs||0), source:x.source || "" })),
     totalCarbs: carbs,
-    carbDose,
-    correctionDose,
-    estimatedDose,
+    carbDose, correctionDose, estimatedDose,
     actualDose: extra.actualDose ?? null,
     adultConfirmed: !!extra.adultConfirmed,
     hiddenCarbsChecked: !!state.meal.hiddenChecked,
@@ -485,9 +633,7 @@ async function saveMealLog(extra={}){
   });
   await unlockBadge("scarlet-sentinel");
   await unlockBadge("feast-reader");
-  if(extra.alreadyInjected){
-    await createAlert("already_injected","orange",`Amara logged that she already injected ${estimatedDose} units Apidra.`);
-  }
+  if(extra.alreadyInjected) await createAlert("already_injected","orange",`Amara logged that she already injected ${estimatedDose} units Apidra.`);
   showBadgeModal("feast-reader", () => { state.view="home"; render(); });
 }
 
@@ -550,28 +696,15 @@ function renderLowSugar(preset=null){
       <h2>Low Sugar</h2>
       <p><strong>No insulin right now.</strong></p>
       <p class="muted">Tell your Circle. Take fast sugar based on your plan. Recheck. Do not take insulin while low.</p>
-      <div class="field">
-        <label>Glucose mg/dL</label>
-        <input id="lowGlucose" type="number" inputmode="numeric" value="${preset || ""}" placeholder="Example: 65" />
-      </div>
-      <div class="field">
-        <label>What did you do?</label>
-        <select id="lowAction">
-          <option>I took fast sugar</option>
-          <option>I told an adult</option>
-          <option>I rechecked</option>
-          <option>I feel worse</option>
-        </select>
-      </div>
+      <div class="field"><label>Glucose mg/dL</label><input id="lowGlucose" type="number" inputmode="numeric" value="${preset || ""}" placeholder="Example: 65" /></div>
+      <div class="field"><label>What did you do?</label><select id="lowAction"><option>I took fast sugar</option><option>I told an adult</option><option>I rechecked</option><option>I feel worse</option></select></div>
       <button class="btn red full" id="saveLow">Save low sugar check</button>
     </div>
   `, "home");
   document.getElementById("saveLow").onclick = async () => {
     const g = Number(document.getElementById("lowGlucose").value);
     const action = document.getElementById("lowAction").value;
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), {
-      glucose:g, context:"low_sugar", action, alertLevel:"red", createdAt:serverTimestamp(), enteredBy:state.user.uid
-    });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), { glucose:g, context:"low_sugar", action, alertLevel:"red", createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await createAlert("low","red",`Amara logged low glucose ${g}. Action: ${action}.`);
     await unlockBadge("crimson-comeback");
     showBadgeModal("crimson-comeback", () => { state.view="home"; render(); });
@@ -594,9 +727,7 @@ function renderInsulinLog(){
     const dose = Number(document.getElementById("dose").value);
     const reason = document.getElementById("reason").value;
     if(!dose || dose <=0) return toast("Please enter dose.");
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
-      insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.user.uid
-    });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), { insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     if(type === "Apidra" && reason === "Correction") await createAlert("correction_logged","orange",`Amara logged correction insulin: ${dose} units Apidra.`);
     toast("Insulin log saved.");
     state.view="home"; render();
@@ -622,12 +753,8 @@ function renderSymptoms(){
   });
   document.getElementById("saveSymptoms").onclick = async () => {
     const arr = [...selected];
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"), {
-      symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.user.uid
-    });
-    if(arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x))){
-      await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`);
-    }
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"), { symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.user.uid });
+    if(arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x))) await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`);
     toast("Symptom log saved.");
     state.view="home"; render();
   };
@@ -635,43 +762,62 @@ function renderSymptoms(){
 
 function renderDiary(){
   const moods = ["Brave","Tired","Angry","Sad","Okay","Proud","Scared","Confused","Strong","Lonely","Annoyed","Hopeful"];
+  const prompts = [
+    "Today my body felt…",
+    "One brave thing I did today was…",
+    "The hardest part was…",
+    "I wish adults understood…",
+    "My sugar number did not define me because…",
+    "Today I was unstoppable when…",
+    "If my body could speak, it would say…"
+  ];
   layout(`
     <div class="card dark">
       <h2>Write a Scarlet Entry</h2>
-      <p class="tagline" style="color:var(--gold-2)">Give your feelings a place to go.</p>
+      <p class="tagline" style="text-align:left;margin-top:6px">Give your feelings a place to go.</p>
     </div>
     <div class="card">
-      <div class="field">
-        <label>Today I feel…</label>
-        <select id="mood">${moods.map(m=>`<option>${m}</option>`).join("")}</select>
-      </div>
-      <div class="field">
-        <label>Scarlet Entry</label>
-        <textarea id="entry" placeholder="Today my body felt…"></textarea>
-      </div>
-      <div class="field">
-        <label>Privacy</label>
-        <select id="privacy">
-          <option value="private">Private to Amara</option>
-          <option value="circle">Share with my Circle</option>
-          <option value="safety">Safety note</option>
-        </select>
-      </div>
+      <div class="field"><label>Today I feel…</label><select id="mood">${moods.map(m=>`<option>${m}</option>`).join("")}</select></div>
+      <div class="field"><label>Prompt</label><select id="prompt">${prompts.map(p=>`<option>${p}</option>`).join("")}</select></div>
+      <div class="field"><label>Scarlet Entry</label><textarea id="entry" placeholder="Today my body felt…"></textarea></div>
+      <div class="field"><label>Privacy</label><select id="privacy"><option value="private">Private to Amara</option><option value="circle">Share with my Circle</option><option value="safety">Safety note</option></select></div>
       <button class="btn scarlet full" id="saveEntry">Save Scarlet Entry</button>
     </div>
   `, "diary");
+  document.getElementById("prompt").onchange = e => document.getElementById("entry").placeholder = e.target.value;
   document.getElementById("saveEntry").onclick = async () => {
     const mood = document.getElementById("mood").value;
+    const prompt = document.getElementById("prompt").value;
     const entry = document.getElementById("entry").value.trim();
     const privacy = document.getElementById("privacy").value;
     if(!entry) return toast("Write a few words first.");
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), {
-      mood, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid
-    });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), { mood, prompt, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), { mood, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await unlockBadge("brave-page");
     if(["Sad","Angry","Scared","Lonely"].includes(mood)) await unlockBadge("girl-who-stayed");
     showBadgeModal(["Sad","Angry","Scared","Lonely"].includes(mood) ? "girl-who-stayed" : "brave-page", () => { state.view="vault"; render(); });
   };
+}
+
+function renderMoodMirror(){
+  layout(`
+    <div class="card dark">
+      <h2>Mood Mirror</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Your feelings are signals too.</p>
+    </div>
+    <div class="card">
+      <p class="muted">This is not a score. This is a place to notice what your heart has been carrying.</p>
+      <div class="divider-line"></div>
+      <p><strong>You are more than your numbers.</strong></p>
+      <p class="muted small" style="margin-top:8px">If today is hard, write a Scarlet Entry or call your Circle.</p>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn scarlet" id="writeMood">Write a Scarlet Entry</button>
+        <button class="btn secondary" id="callCircle">Call My Circle</button>
+      </div>
+    </div>
+  `, "diary");
+  document.getElementById("writeMood").onclick = () => { state.view="diary"; render(); };
+  document.getElementById("callCircle").onclick = () => { state.view="circle"; render(); };
 }
 
 function renderVault(){
@@ -679,8 +825,8 @@ function renderVault(){
   layout(`
     <div class="card dark">
       <h2>The Scarlet Vault</h2>
-      <p class="tagline" style="color:var(--gold-2)">Proof that you kept going.</p>
-      <p class="small" style="margin-top:10px;color:var(--muted)">These are not prizes for perfect numbers. These are marks of courage — for checking, telling the truth, asking for help, and staying.</p>
+      <p class="tagline" style="text-align:left;margin-top:6px">Proof that you kept going.</p>
+      <p class="small muted" style="margin-top:10px">These are not prizes for perfect numbers. These are marks of courage — for checking, telling the truth, asking for help, and staying.</p>
     </div>
     <div class="card">
       <h3>The Wall of Proof</h3>
@@ -694,12 +840,11 @@ function renderVault(){
             const unlocked = state.unlockedBadges.has(b.id);
             return `
               <div class="badge-card ${unlocked ? "" : "locked"}">
-                <div class="badge-seal">${unlocked ? "✦" : "◌"}</div>
+                <div class="badge-seal"><span>${unlocked ? "✦" : "◌"}</span></div>
                 <h3>${esc(b.name)}</h3>
                 <p>${unlocked ? esc(b.desc) : "Still sleeping. Waiting for its moment."}</p>
                 <p><strong>${unlocked ? "Unlocked" : "Wakes when:"}</strong> ${esc(b.rule)}</p>
-              </div>
-            `;
+              </div>`;
           }).join("")}
         </div>
       </div>
@@ -711,15 +856,10 @@ function renderCircle(){
   layout(`
     <div class="card dark">
       <h2>Call My Circle</h2>
-      <p class="tagline" style="color:var(--gold-2)">Mom. Dad. Tita.</p>
+      <p class="tagline" style="text-align:left;margin-top:6px">Mom. Dad. Tita.</p>
     </div>
     <div class="grid single">
-      ${CIRCLE.map(name => `
-        <button class="action" data-person="${name}">
-          <strong>I need ${name}</strong>
-          <span>Save alert request to the dashboard and email system.</span>
-        </button>
-      `).join("")}
+      ${CIRCLE.map(name => `<button class="action" data-person="${name}"><strong>I need ${name}</strong><span>Save alert request to the dashboard and email system.</span></button>`).join("")}
     </div>
   `, "home");
   document.querySelectorAll("[data-person]").forEach(btn => btn.onclick = async () => {
@@ -746,32 +886,18 @@ function renderEmergency(message){
 }
 
 async function addKetoneLog(glucose, ketoneResult){
-  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), {
-    glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid,
-    alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange"
-  });
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), { glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid, alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange" });
 }
-
 async function createAlert(type, severity, message){
-  await addDoc(collection(db,"families",FAMILY_ID,"alerts"), {
-    childId:CHILD_ID, type, severity, message,
-    recipients: state.settings.alertEmails || [],
-    acknowledged:false,
-    createdAt:serverTimestamp(),
-    enteredBy: state.user?.uid || null
-  });
+  await addDoc(collection(db,"families",FAMILY_ID,"alerts"), { childId:CHILD_ID, type, severity, message, recipients: state.settings.alertEmails || [], acknowledged:false, createdAt:serverTimestamp(), enteredBy: state.user?.uid || null });
 }
-
 async function unlockBadge(id){
   if(state.unlockedBadges.has(id)) return;
   const badge = BADGES.find(b => b.id === id);
   if(!badge) return;
-  await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks",id), {
-    badgeId:id, name:badge.name, desc:badge.desc, createdAt:serverTimestamp()
-  }, { merge:true });
+  await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks",id), { badgeId:id, name:badge.name, desc:badge.desc, createdAt:serverTimestamp() }, { merge:true });
   state.unlockedBadges.add(id);
 }
-
 function showBadgeModal(id, onClose){
   const b = BADGES.find(x => x.id === id);
   if(!b){ onClose?.(); return; }
@@ -780,18 +906,14 @@ function showBadgeModal(id, onClose){
   div.innerHTML = `
     <div class="modal">
       <p class="pill">Badge Unlocked</p>
-      <div class="badge-seal" style="margin-top:16px">✦</div>
+      <div class="badge-seal" style="margin-top:16px"><span>✦</span></div>
       <h2>${esc(b.name)}</h2>
-      <p class="tagline">${esc(b.desc)}</p>
+      <p class="tagline" style="text-align:left;margin-top:8px">${esc(b.desc)}</p>
       <p class="muted small" style="margin-top:10px">${esc(b.rule)}</p>
       <button class="btn scarlet full" style="margin-top:18px" id="closeBadge">Keep going</button>
-    </div>
-  `;
+    </div>`;
   document.body.appendChild(div);
-  document.getElementById("closeBadge").onclick = () => {
-    div.remove();
-    onClose?.();
-  };
+  document.getElementById("closeBadge").onclick = () => { div.remove(); onClose?.(); };
 }
 
 function renderAdult(){
@@ -799,8 +921,8 @@ function renderAdult(){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small">SD</div>
-          <div><strong>Parent Dashboard</strong><p class="small muted">Mom · Dad · Tita</p></div>
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title"><strong>Parent Dashboard</strong><p class="small muted">Mom · Dad · Tita</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="build-tag">${BUILD}</span>
@@ -809,7 +931,7 @@ function renderAdult(){
       </div>
       <div class="card dark">
         <h2>Amara’s Circle</h2>
-        <p class="tagline" style="color:var(--gold-2)">Celebrate effort, not perfect glucose.</p>
+        <p class="tagline" style="text-align:left;margin-top:6px">Celebrate effort, not perfect glucose.</p>
       </div>
       <div class="card">
         <h3>Needs Attention</h3>
@@ -821,19 +943,15 @@ function renderAdult(){
         <div class="kv"><span>Dose rounding</span><strong>Nearest ${state.settings.doseRounding} unit</strong></div>
         <div class="kv"><span>High alert</span><strong>${state.settings.highThreshold}+</strong></div>
         <div class="kv"><span>Urgent high</span><strong>${state.settings.urgentHighThreshold}+</strong></div>
-        <p class="small muted" style="margin-top:10px">Settings are locked in this build. Edit in Firestore only after adult review. Alert records are stored in Firebase; actual email delivery will be connected in the next backend notification step.</p>
+        <p class="small muted" style="margin-top:10px">Settings are locked. Alert records are stored in Firebase; actual email delivery will be connected in the notification phase.</p>
       </div>
-    </div>
-  `;
+    </div>`;
   bindGlobal();
   const alertsRef = collection(db,"families",FAMILY_ID,"alerts");
   onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
     const list = document.getElementById("alertsList");
     if(!list) return;
-    if(snap.empty){
-      list.innerHTML = `<p class="muted small">No alerts yet.</p>`;
-      return;
-    }
+    if(snap.empty){ list.innerHTML = `<p class="muted small">No alerts yet.</p>`; return; }
     list.innerHTML = snap.docs.map(d => {
       const a = d.data();
       return `<div class="list-item">
