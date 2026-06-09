@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function sameFamily(familyId) {
+      return signedIn() && userDoc().data.familyId == familyId;
+    }
+
+    function isAdult() {
+      return signedIn() && userDoc().data.role == "adult";
+    }
+
+    function isChild() {
+      return signedIn() && userDoc().data.role == "child";
+    }
+
+    match /users/{userId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /families/{familyId} {
+      allow read: if sameFamily(familyId);
+      allow write: if isAdult() && sameFamily(familyId);
+
+      match /foodLibrary/{foodId} {
+        allow read: if sameFamily(familyId);
+        allow create: if sameFamily(familyId);
+        allow update, delete: if isAdult() && sameFamily(familyId);
+      }
+
+      match /badges/{badgeId} {
+        allow read: if sameFamily(familyId);
+        allow write: if isAdult() && sameFamily(familyId);
+      }
+
+      match /alerts/{alertId} {
+        allow read, create: if sameFamily(familyId);
+        allow update: if isAdult() && sameFamily(familyId);
+        allow delete: if false;
+      }
+
+      match /children/{childId} {
+        allow read: if sameFamily(familyId);
+        allow write: if isAdult() && sameFamily(familyId);
+
+        match /settings/{settingId} {
+          allow read: if sameFamily(familyId);
+          allow write: if isAdult() && sameFamily(familyId);
+        }
+
+        match /mealLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if false;
+        }
+
+        match /glucoseLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if false;
+        }
+
+        match /insulinLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if false;
+        }
+
+        match /ketoneLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if false;
+        }
+
+        match /symptomLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if false;
+        }
+
+        match /diaryEntries/{entryId} {
+          allow create: if sameFamily(familyId);
+          allow read: if sameFamily(familyId);
+          allow update, delete: if false;
+        }
+
+        match /badgeUnlocks/{badgeId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if false;
+        }
+      }
+    }
+  }
+}
