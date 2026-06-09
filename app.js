@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V1.3";
+const BUILD = "V1.4";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 const DEFAULT_SETTINGS = {
@@ -159,7 +159,7 @@ function renderLogin(){
         <p class="tagline">Every drop. Every breath. Unstoppable.</p>
         <div class="subtle-divider"></div>
         <p class="build-tag" style="margin-top:10px">${BUILD}</p>
-        <p class="muted small" style="margin-top:14px">A private safety diary for Amara.</p>
+        <p class="muted small" style="margin-top:14px">A private safety diary for Amara.</p><p class="muted small">Phase 1 + 2 safety build.</p>
 
         <div class="field" style="margin-top:18px;text-align:left">
           <label>Email</label>
@@ -248,6 +248,10 @@ function renderHome(){
       <h2 style="margin-top:12px">Hello, Amara.</h2>
       <p class="tagline" style="color:var(--gold-2)">What does your body need?</p>
     </div>
+    <div class="card">
+      <h3>Safety first</h3>
+      <p class="muted small">This app gives an estimate from the saved family plan. It must never be treated as an order to inject. If unsure, call the Circle.</p>
+    </div>
     <div class="grid">
       <button class="action scarlet" data-go="meal"><strong>I’m Eating</strong><span>Check sugar, count carbs, estimate safely.</span></button>
       <button class="action" data-go="high"><strong>My Sugar Is High</strong><span>Slow down, check safety, alert the Circle.</span></button>
@@ -309,7 +313,7 @@ function renderKetonePrompt(next="meal"){
       <p class="muted">High sugar can leave warning signs. Let’s check if we can.</p>
       <div class="divider"></div>
       <p><strong>Glucose:</strong> ${g} mg/dL</p>
-      <p class="small muted">Please check ketones if strips are available. Tell your Circle.</p>
+      <p class="small muted">Please check ketones if strips are available. Tell your Circle now. If there are no strips, log it honestly so adults can help.</p>
     </div>
     <div class="grid single">
       ${["I checked — negative","Trace / small","Moderate / large","No strips","I don’t know how","Adult not available"].map(k => `
@@ -545,7 +549,7 @@ function renderLowSugar(preset=null){
     <div class="card danger">
       <h2>Low Sugar</h2>
       <p><strong>No insulin right now.</strong></p>
-      <p class="muted">Tell your Circle. Take fast sugar based on your plan. Recheck.</p>
+      <p class="muted">Tell your Circle. Take fast sugar based on your plan. Recheck. Do not take insulin while low.</p>
       <div class="field">
         <label>Glucose mg/dL</label>
         <input id="lowGlucose" type="number" inputmode="numeric" value="${preset || ""}" placeholder="Example: 65" />
@@ -817,7 +821,7 @@ function renderAdult(){
         <div class="kv"><span>Dose rounding</span><strong>Nearest ${state.settings.doseRounding} unit</strong></div>
         <div class="kv"><span>High alert</span><strong>${state.settings.highThreshold}+</strong></div>
         <div class="kv"><span>Urgent high</span><strong>${state.settings.urgentHighThreshold}+</strong></div>
-        <p class="small muted" style="margin-top:10px">Settings are locked in this first build. Edit in Firestore only after adult review.</p>
+        <p class="small muted" style="margin-top:10px">Settings are locked in this build. Edit in Firestore only after adult review. Alert records are stored in Firebase; actual email delivery will be connected in the next backend notification step.</p>
       </div>
     </div>
   `;

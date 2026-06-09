@@ -239,3 +239,13 @@ input:focus,textarea:focus,select:focus{border-color:var(--gold);box-shadow:0 0 
   width:92px;height:1px;background:linear-gradient(90deg,transparent, rgba(208,161,76,.5), transparent);margin:12px auto 2px;
 }
 @media (max-width:380px){.grid,.badge-grid{grid-template-columns:1fr}h1{font-size:31px}}
+
+
+/* V1.4 Phase 1 + 2: large iPhone / Pro Max tuning while staying responsive */
+@media (min-width: 430px){
+  .app-shell{max-width:540px;padding-left:20px;padding-right:20px}
+  .front-cover{padding:30px 22px}
+  .action{min-height:98px}
+  h1{font-size:38px}
+  h2{font-size:29px}
+}
