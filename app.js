@@ -1,9 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  onAuthStateChanged, signOut
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import {
   getFirestore, collection, addDoc, setDoc, doc, getDoc, getDocs, query,
   where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc, deleteDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -11,14 +7,58 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 const db = getFirestore(app);
 
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V3.0";
+const BUILD = "V4.0";
 const CIRCLE = ["Mom", "Dad", "Tita"];
+
+// ── PASSCODE SYSTEM ──────────────────────────────
+// Passcodes are hashed before storing — never plain text
+async function hashCode(str){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+const ROLES = {
+  amara: { label:"Amara",  icon:"🩸", type:"child" },
+  mom:   { label:"Mom",    icon:"🌙", type:"adult" },
+  dad:   { label:"Dad",    icon:"⚡", type:"adult" },
+  tita:  { label:"Tita",   icon:"🔮", type:"adult" }
+};
+
+async function verifyPasscode(roleKey, code){
+  try {
+    const hashed = await hashCode(code.trim());
+    const snap = await getDoc(doc(db,"families",FAMILY_ID,"passcodes",roleKey));
+    if(!snap.exists()) return false;
+    return snap.data().hash === hashed;
+  } catch(e) {
+    console.error("Passcode verify error:", e);
+    return false;
+  }
+}
+
+async function savePasscode(roleKey, code){
+  const hashed = await hashCode(code.trim());
+  await setDoc(doc(db,"families",FAMILY_ID,"passcodes",roleKey), {
+    hash: hashed,
+    updatedAt: serverTimestamp()
+  });
+}
+
+async function ensurePasscodes(){
+  // Seeds default passcodes if they don't exist yet
+  const defaults = { amara:"Amara16", mom:"Neri01", dad:"George13", tita:"Aileen07" };
+  for(const [role, code] of Object.entries(defaults)){
+    const snap = await getDoc(doc(db,"families",FAMILY_ID,"passcodes",role));
+    if(!snap.exists()){
+      await savePasscode(role, code);
+    }
+  }
+}
 
 const DEFAULT_SETTINGS = {
   childName: "Amara",
@@ -81,11 +121,9 @@ const BADGES = [
 ];
 
 let state = {
-  user:null,
   role:null,
-  selectedRole:"",
-  loginInProgress:false,
-  pendingRepair:null,
+  roleKey:"",
+  authenticated:false,
   settings: DEFAULT_SETTINGS,
   foods: STARTER_FOODS,
   unlockedBadges: new Set(),
@@ -143,37 +181,38 @@ function renderFlowDone({title="Saved", message="", next=[]} = {}){
   });
 }
 
-function roleToStoredRole(role){
-  return role === "amara" ? "child" : "adult";
-}
-function roleTitle(role){
-  return ({ amara:"🩸 Welcome, Amara", mom:"🌙 Welcome, Mom", dad:"⚡ Welcome, Dad", tita:"🔮 Welcome, Tita" })[role] || "Enter Your Details";
+// ── ROLE HELPERS ─────────────────────────────────
+function roleType(roleKey){
+  return roleKey === "amara" ? "child" : "adult";
 }
 
+// ── RENDER ENTRY POINT ───────────────────────────
 function render(){
-  if(!state.user) return renderLogin();
+  if(!state.authenticated) return renderLogin();
   if(state.role === "adult") return renderAdult();
   switch(state.view){
-    case "meal": return renderMealStart();
-    case "high": return renderHighSugar();
-    case "low": return renderLowSugar();
+    case "meal":    return renderMealStart();
+    case "high":    return renderHighSugar();
+    case "low":     return renderLowSugar();
     case "insulin": return renderInsulinLog();
-    case "feel": return renderSymptoms();
-    case "diary": return renderDiary();
-    case "vault": return renderVault();
-    case "circle": return renderCircle();
-    case "foods": return renderFoodLibrary();
-    case "mood": return renderMoodMirror();
+    case "feel":    return renderSymptoms();
+    case "diary":   return renderDiary();
+    case "vault":   return renderVault();
+    case "circle":  return renderCircle();
+    case "foods":   return renderFoodLibrary();
+    case "mood":    return renderMoodMirror();
     case "reports": return renderReports();
-    case "pages": return renderScarletPages();
-    default: return renderHome();
+    case "pages":   return renderScarletPages();
+    default:        return renderHome();
   }
 }
 
+// ── LOGIN SCREEN ─────────────────────────────────
 function renderLogin(){
   $app.innerHTML = `
     <section class="screen center">
       <div class="app-wrapper">
+
         <div class="header">
           <div class="scarlet-drop"></div>
           <div class="app-title">The Scarlet <span>Diaries</span></div>
@@ -182,9 +221,10 @@ function renderLogin(){
           <div class="build-tag">${BUILD}</div>
         </div>
 
-        <div class="login-card">
-          <!-- STEP 1: WHO ARE YOU -->
-          <div id="roleSelection">
+        <div class="login-card" id="loginCard">
+
+          <!-- STEP 1: ROLE SELECTION -->
+          <div id="roleStep">
             <div class="login-prompt">Who are you?</div>
             <div class="role-buttons">
               <button class="role-btn amara" data-role="amara">
@@ -195,43 +235,46 @@ function renderLogin(){
                 <button class="role-btn circle" data-role="mom"><span class="role-icon">🌙</span> Mom</button>
                 <button class="role-btn circle" data-role="dad"><span class="role-icon">⚡</span> Dad</button>
               </div>
-              <button class="role-btn circle" data-role="tita"><span class="role-icon">🔮</span> I am Tita</button>
+              <button class="role-btn circle" data-role="tita">
+                <span class="role-icon">🔮</span>
+                <span>I am Tita</span>
+              </button>
             </div>
           </div>
 
-          <!-- STEP 2: LOGIN FORM -->
-          <div class="auth-form" id="authForm">
-            <div class="form-title" id="formTitle">Enter Your Details</div>
-            <div class="error-msg" id="errorMsg"></div>
-            <input type="email" class="form-input" id="emailInput" placeholder="Email address" autocomplete="email" />
-            <input type="password" class="form-input" id="passwordInput" placeholder="Password" autocomplete="current-password" />
-            <button class="submit-btn" id="loginBtn">
-              <span style="font-size:16px">🗝</span>
+          <!-- STEP 2: PASSCODE -->
+          <div id="passcodeStep" style="display:none">
+            <div class="form-title" id="passcodeTitle">Enter your code</div>
+            <div class="error-msg" id="passcodeError"></div>
+            <div style="position:relative;margin:8px 0">
+              <input
+                type="password"
+                class="form-input"
+                id="passcodeInput"
+                placeholder="Your personal code"
+                autocomplete="current-password"
+                style="padding-right:48px"
+              />
+              <button id="togglePasscode" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ash);font-size:18px;cursor:pointer;padding:4px">👁</button>
+            </div>
+            <button class="submit-btn" id="passcodeBtn">
+              <span>🗝</span>
               <span>Unlock the Diary</span>
             </button>
-            <div style="display:flex;align-items:center;gap:12px;margin:4px 0">
-              <div style="flex:1;height:1px;background:rgba(176,28,46,0.18)"></div>
-              <span class="small" style="color:var(--ash);letter-spacing:1px">OR</span>
-              <div style="flex:1;height:1px;background:rgba(176,28,46,0.18)"></div>
-            </div>
-            <button class="create-small" id="createBtn">First time? Create this account</button>
-            <button class="back-btn" id="backBtn" style="margin-top:4px">← Choose a different role</button>
+            <button class="back-btn" id="backToRoles" style="margin-top:12px">← Choose a different role</button>
           </div>
 
-          <!-- STEP 2b: FIRST TIME SETUP -->
-          <div class="auth-form" id="setupForm">
-            <div class="form-title" id="setupTitle">Create Your Account</div>
-            <p class="small muted" style="text-align:center;line-height:1.5;margin-bottom:4px">This is a private family app. Use the email agreed with the family.</p>
-            <div class="error-msg" id="setupErrorMsg"></div>
-            <input type="email" class="form-input" id="setupEmail" placeholder="Email address" autocomplete="email" />
-            <input type="password" class="form-input" id="setupPassword" placeholder="Choose a password" autocomplete="new-password" />
-            <input type="password" class="form-input" id="setupPassword2" placeholder="Confirm password" autocomplete="new-password" />
-            <button class="submit-btn" id="setupBtn">
-              <span style="font-size:16px">✦</span>
-              <span>Create My Account</span>
-            </button>
-            <button class="back-btn" id="backFromSetup" style="margin-top:4px">← Back to login</button>
+          <!-- STEP 3: CHANGE PIN (from settings) -->
+          <div id="changePinStep" style="display:none">
+            <div class="form-title">Change Your Code</div>
+            <div class="error-msg" id="changePinError"></div>
+            <input type="password" class="form-input" id="currentPin" placeholder="Current code" autocomplete="current-password" style="margin-bottom:10px" />
+            <input type="password" class="form-input" id="newPin" placeholder="New code" autocomplete="new-password" style="margin-bottom:10px" />
+            <input type="password" class="form-input" id="confirmPin" placeholder="Confirm new code" autocomplete="new-password" style="margin-bottom:10px" />
+            <button class="submit-btn" id="savePinBtn">Save New Code</button>
+            <button class="back-btn" id="cancelChangePin" style="margin-top:10px">← Cancel</button>
           </div>
+
         </div>
 
         <div class="footer">The Scarlet Diaries · Private &amp; Protected</div>
@@ -239,304 +282,148 @@ function renderLogin(){
     </section>
   `;
 
+  // Role selection
   document.querySelectorAll("[data-role]").forEach(btn => btn.onclick = () => {
-    state.selectedRole = btn.dataset.role;
-    document.getElementById("roleSelection").style.display = "none";
-    document.getElementById("authForm").classList.add("visible");
-    document.getElementById("formTitle").textContent = roleTitle(state.selectedRole);
-    hideError();
+    state.roleKey = btn.dataset.role;
+    document.getElementById("roleStep").style.display = "none";
+    document.getElementById("passcodeStep").style.display = "block";
+    const labels = { amara:"🩸 Hello Amara", mom:"🌙 Hello Mom", dad:"⚡ Hello Dad", tita:"🔮 Hello Tita" };
+    document.getElementById("passcodeTitle").textContent = labels[state.roleKey] || "Enter your code";
+    document.getElementById("passcodeInput").focus();
+    clearPasscodeError();
   });
 
-  // Back from login form
-  document.getElementById("backBtn").onclick = () => {
-    state.selectedRole = "";
-    document.getElementById("roleSelection").style.display = "block";
-    document.getElementById("authForm").classList.remove("visible");
-    document.getElementById("setupForm").classList.remove("visible");
-    hideError();
+  // Back to role selection
+  document.getElementById("backToRoles").onclick = () => {
+    state.roleKey = "";
+    document.getElementById("roleStep").style.display = "block";
+    document.getElementById("passcodeStep").style.display = "none";
+    document.getElementById("passcodeInput").value = "";
+    clearPasscodeError();
   };
 
-  // Login
-  document.getElementById("loginBtn").onclick = () => doLogin(false);
-  document.getElementById("passwordInput").onkeydown = e => { if(e.key === "Enter") doLogin(false); };
-
-  // Show setup form
-  document.getElementById("createBtn").onclick = () => {
-    document.getElementById("authForm").classList.remove("visible");
-    document.getElementById("setupForm").classList.add("visible");
-    const titles = { amara:"🩸 Create Amara's Account", mom:"🌙 Create Mom's Account", dad:"⚡ Create Dad's Account", tita:"🔮 Create Tita's Account" };
-    document.getElementById("setupTitle").textContent = titles[state.selectedRole] || "Create Account";
-    hideError();
+  // Show/hide passcode
+  document.getElementById("togglePasscode").onclick = () => {
+    const inp = document.getElementById("passcodeInput");
+    inp.type = inp.type === "password" ? "text" : "password";
   };
 
-  // Back from setup to login
-  document.getElementById("backFromSetup").onclick = () => {
-    document.getElementById("setupForm").classList.remove("visible");
-    document.getElementById("authForm").classList.add("visible");
-    hideErrorSetup();
+  // Enter key on passcode
+  document.getElementById("passcodeInput").onkeydown = e => {
+    if(e.key === "Enter") attemptLogin();
   };
 
-  // Create account
-  document.getElementById("setupBtn").onclick = () => doSetup();
-  document.getElementById("setupPassword2").onkeydown = e => { if(e.key === "Enter") doSetup(); };
+  // Unlock button
+  document.getElementById("passcodeBtn").onclick = () => attemptLogin();
 }
 
-function showErrorSetup(msg){
-  const el = document.getElementById("setupErrorMsg");
+function clearPasscodeError(){
+  const el = document.getElementById("passcodeError");
+  if(el){ el.textContent = ""; el.classList.remove("visible"); }
+}
+function showPasscodeError(msg){
+  const el = document.getElementById("passcodeError");
   if(!el) return toast(msg);
   el.textContent = msg;
   el.classList.add("visible");
 }
-function hideErrorSetup(){
-  const el = document.getElementById("setupErrorMsg");
-  if(el) el.classList.remove("visible");
-}
 
-async function doSetup(){
-  const email = document.getElementById("setupEmail").value.trim();
-  const pass = document.getElementById("setupPassword").value;
-  const pass2 = document.getElementById("setupPassword2").value;
-  const roleKey = state.selectedRole || "amara";
+async function attemptLogin(){
+  const code = document.getElementById("passcodeInput")?.value?.trim();
+  const roleKey = state.roleKey;
+  if(!code) return showPasscodeError("Please enter your code.");
+  if(!roleKey) return showPasscodeError("Please select your role first.");
 
-  if(!email) return showErrorSetup("Please enter an email address.");
-  if(!pass || pass.length < 6) return showErrorSetup("Password must be at least 6 characters.");
-  if(pass !== pass2) return showErrorSetup("Passwords do not match. Please try again.");
-
-  const btn = document.getElementById("setupBtn");
-  const restore = setBusy(btn, "Creating account…");
-  hideErrorSetup();
+  const btn = document.getElementById("passcodeBtn");
+  const restore = setBusy(btn, "Checking…");
+  clearPasscodeError();
 
   try {
-    state.loginInProgress = true;
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    const role = roleToStoredRole(roleKey);
-    await setDoc(doc(db,"users",cred.user.uid), {
-      email, role, roleKey,
-      familyId: FAMILY_ID,
-      displayName: role === "child" ? "Amara" : roleKey,
-      active: true,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    }, { merge:true });
+    // First time: seed passcodes if not yet in Firestore
+    await ensurePasscodes();
 
-    sessionStorage.setItem("scarletJustLoggedIn","yes");
-    state.user = cred.user;
-    state.role = role;
-    state.loginInProgress = false;
-    localStorage.setItem("scarletRole", role);
-    localStorage.setItem("scarletRoleKey", roleKey);
-    toast("Account created. Welcome to The Scarlet Diaries.");
-    await safeEnsureDefaults();
-    await loadData();
-    render();
-  } catch(err) {
-    state.loginInProgress = false;
-    restore();
-    if(err.code === "auth/email-already-in-use") showErrorSetup("This email already has an account. Use Unlock the Diary instead.");
-    else if(err.code === "auth/invalid-email") showErrorSetup("Please enter a valid email address.");
-    else if(err.code === "auth/weak-password") showErrorSetup("Please use a stronger password — at least 6 characters.");
-    else showErrorSetup(err.message || "Something went wrong. Please try again.");
-  } finally {
-    if(!state.pendingRepair) restore();
-  }
-}
-function showError(msg){
-  const el = document.getElementById("errorMsg");
-  if(!el) return toast(msg);
-  el.textContent = msg;
-  el.classList.add("visible");
-}
-function hideError(){
-  const el = document.getElementById("errorMsg");
-  if(el) el.classList.remove("visible");
-}
-
-
-function renderProfileRepair(){
-  const repair = state.pendingRepair;
-  if(!repair){
-    renderLogin();
-    return;
-  }
-
-  const roleName = ({ amara:"Amara", mom:"Mom", dad:"Dad", tita:"Tita" })[repair.roleKey] || repair.roleKey;
-
-  $app.innerHTML = `
-    <section class="screen center">
-      <div class="app-wrapper">
-        <div class="header">
-          <div class="scarlet-drop"></div>
-          <div class="app-title">The Scarlet <span>Diaries</span></div>
-          <div class="divider"></div>
-          <div class="tagline">Every drop. Every breath. Unstoppable.</div>
-          <div class="build-tag">${BUILD}</div>
-        </div>
-
-        <div class="login-card">
-          <div class="form-title">Profile Repair Needed</div>
-          <p class="muted small" style="text-align:center;line-height:1.5">
-            This email can sign in, but it does not yet have a Scarlet profile.
-          </p>
-          <div class="card" style="box-shadow:none">
-            <div class="kv"><span>Email</span><strong>${esc(repair.email)}</strong></div>
-            <div class="kv"><span>Create profile as</span><strong>${esc(roleName)}</strong></div>
-          </div>
-          <button class="submit-btn" id="repairBtn">Create Scarlet Profile</button>
-          <button class="back-btn" id="repairCancel">Cancel and choose another role</button>
-        </div>
-
-        <div class="footer">The Scarlet Diaries · Private &amp; Protected</div>
-      </div>
-    </section>
-  `;
-
-  document.getElementById("repairCancel").onclick = async () => {
-    state.pendingRepair = null;
-    state.loginInProgress = false;
-    sessionStorage.removeItem("scarletJustLoggedIn");
-    await signOut(auth);
-    renderLogin();
-  };
-
-  document.getElementById("repairBtn").onclick = async () => {
-    const btn = document.getElementById("repairBtn");
-    const restore = setBusy(btn, "Creating profile…");
-    try{
-      const { user, email, role, roleKey } = state.pendingRepair;
-      await setDoc(doc(db,"users",user.uid), {
-        email,
-        role,
-        roleKey,
-        familyId:FAMILY_ID,
-        displayName: role === "child" ? "Amara" : roleKey,
-        active:true,
-        repairedAt:serverTimestamp(),
-        updatedAt:serverTimestamp()
-      }, { merge:true });
-
-      toast("Scarlet profile created.");
-      sessionStorage.setItem("scarletJustLoggedIn","yes");
-      state.user = user;
-      state.role = role;
-      state.pendingRepair = null;
-      state.loginInProgress = false;
-      localStorage.setItem("scarletRole", role);
-      localStorage.setItem("scarletRoleKey", roleKey);
-
-      await safeEnsureDefaults();
-      await loadData();
-      render();
-    }catch(err){
-      console.error(err);
-      if(String(err.message || "").toLowerCase().includes("permission")){
-        toast("Profile repair blocked. Please publish the V2.0 firestore.rules file.");
-      }else{
-        toast("Could not repair profile yet. Please try again.");
-      }
-    }finally{
+    const valid = await verifyPasscode(roleKey, code);
+    if(!valid){
       restore();
-    }
-  };
-}
-
-async function doLogin(create=false){
-  const email = document.getElementById("emailInput").value.trim();
-  const pass = document.getElementById("passwordInput").value;
-  const roleKey = state.selectedRole || "amara";
-  const role = roleToStoredRole(roleKey);
-  if(!email || !pass) return showError("Please enter your email and password.");
-
-  const btn = create ? document.getElementById("createBtn") : document.getElementById("loginBtn");
-  const originalText = btn ? btn.innerHTML : "";
-
-  try{
-    state.loginInProgress = true;
-    if(btn){ btn.disabled = true; btn.innerHTML = create ? "Creating account…" : "Unlocking…"; }
-    hideError();
-
-    const cred = create
-      ? await createUserWithEmailAndPassword(auth, email, pass)
-      : await signInWithEmailAndPassword(auth, email, pass);
-
-    const userRef = doc(db,"users",cred.user.uid);
-    let userSnap = await getDoc(userRef);
-
-    if(create){
-      // First-time bootstrap: users can create only their own profile under the Firestore rules.
-      await setDoc(userRef, {
-        email,
-        role,
-        roleKey,
-        familyId:FAMILY_ID,
-        displayName: role === "child" ? "Amara" : roleKey,
-        active:true,
-        createdAt:serverTimestamp(),
-        updatedAt:serverTimestamp()
-      }, { merge:true });
-      userSnap = await getDoc(userRef);
-      toast("Account created. Unlocking diary…");
-    }
-
-    if(!userSnap.exists()){
-      // Existing Firebase Auth account, but missing Firestore profile.
-      // Keep the user signed in and ask permission to create the selected profile.
-      state.pendingRepair = {
-        user: cred.user,
-        email,
-        role,
-        roleKey
-      };
-      if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
-      renderProfileRepair();
+      showPasscodeError("That code is not right. Please try again.");
+      document.getElementById("passcodeInput").value = "";
+      document.getElementById("passcodeInput").focus();
       return;
     }
 
-    const profile = userSnap.data();
-    if(profile.roleKey !== roleKey || profile.role !== role){
-      await signOut(auth);
-      state.loginInProgress = false;
-      return showError("This account is not assigned to this profile. Please choose the correct profile.");
-    }
-
-    if(profile.active === false){
-      await signOut(auth);
-      state.loginInProgress = false;
-      return showError("This account is not active. Please ask an adult to check it.");
-    }
-
-    sessionStorage.setItem("scarletJustLoggedIn","yes");
-    state.user = cred.user;
-    state.role = role;
-    state.loginInProgress = false;
-    localStorage.setItem("scarletRole", role);
+    // Authenticated
+    state.authenticated = true;
+    state.roleKey = roleKey;
+    state.role = roleType(roleKey);
     localStorage.setItem("scarletRoleKey", roleKey);
+    localStorage.setItem("scarletRole", state.role);
 
     await safeEnsureDefaults();
     await loadData();
     render();
 
-  }catch(err){
-    console.error(err);
-    state.loginInProgress = false;
-    if(err.code === "auth/invalid-email") showError("Please enter a valid email address.");
-    else if(err.code === "auth/email-already-in-use") showError("This email already has an account. Use Unlock the Diary instead.");
-    else if(err.code === "auth/weak-password") showError("Please use a stronger password.");
-    else if(err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") showError("Incorrect email or password. Try again.");
-    else if(String(err.message || "").toLowerCase().includes("permission")) showError("Firebase permissions blocked setup. Please publish the V2.0 firestore.rules file, then try again.");
-    else showError(err.message || "Something went wrong. Please try again.");
-  }finally{
-    if(!state.pendingRepair && btn){ btn.disabled = false; btn.innerHTML = originalText; }
+  } catch(err){
+    console.error("Login error:", err);
+    restore();
+    if(String(err.message||"").toLowerCase().includes("permission")){
+      showPasscodeError("Firebase rules need to be published. Please update firestore.rules first.");
+    } else {
+      showPasscodeError("Something went wrong. Please try again.");
+    }
   }
 }
 
+// ── CHANGE PIN ────────────────────────────────────
+async function showChangePin(){
+  // Show change pin step inside login card
+  const card = document.getElementById("loginCard");
+  if(!card) return;
+  document.getElementById("roleStep") && (document.getElementById("roleStep").style.display = "none");
+  document.getElementById("passcodeStep") && (document.getElementById("passcodeStep").style.display = "none");
+  document.getElementById("changePinStep").style.display = "block";
+
+  document.getElementById("savePinBtn").onclick = async () => {
+    const current = document.getElementById("currentPin").value.trim();
+    const newP = document.getElementById("newPin").value.trim();
+    const confirm = document.getElementById("confirmPin").value.trim();
+    const errEl = document.getElementById("changePinError");
+
+    const showErr = msg => { errEl.textContent = msg; errEl.classList.add("visible"); };
+    errEl.classList.remove("visible");
+
+    if(!current) return showErr("Please enter your current code.");
+    if(!newP || newP.length < 4) return showErr("New code must be at least 4 characters.");
+    if(newP !== confirm) return showErr("New codes do not match.");
+
+    const btn = document.getElementById("savePinBtn");
+    const restore = setBusy(btn, "Saving…");
+
+    const valid = await verifyPasscode(state.roleKey, current);
+    if(!valid){ restore(); return showErr("Current code is incorrect."); }
+
+    await savePasscode(state.roleKey, newP);
+    restore();
+    toast("Your code has been updated.");
+    render();
+  };
+
+  document.getElementById("cancelChangePin").onclick = () => render();
+}
+
+// ── LOGOUT ────────────────────────────────────────
+function logout(){
+  state.authenticated = false;
+  state.role = null;
+  state.roleKey = "";
+  localStorage.removeItem("scarletRole");
+  localStorage.removeItem("scarletRoleKey");
+  renderLogin();
+}
+
+// ── ENSURE DEFAULTS ───────────────────────────────
 async function safeEnsureDefaults(){
-  try{
-    await ensureDefaults();
-  }catch(err){
-    console.warn("Starter setup skipped or blocked:", err);
-    // Do not block login just because starter food/badge seeding failed.
-    // The app can still open, and adults can publish rules or add data later.
-  }
+  try{ await ensureDefaults(); }
+  catch(err){ console.warn("Starter setup skipped:", err); }
 }
 
 async function ensureDefaults(){
@@ -549,7 +436,8 @@ async function ensureDefaults(){
     for(const food of STARTER_FOODS){
       const foodId = food.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
       await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",foodId), {
-        ...food, familyId:FAMILY_ID, verified: food.source === "Family starter", favorite: !!food.favorite, active:true, updatedAt: serverTimestamp()
+        ...food, familyId:FAMILY_ID, verified: food.source === "Family starter",
+        favorite: !!food.favorite, active:true, updatedAt: serverTimestamp()
       }, { merge:true });
     }
   }
@@ -560,6 +448,7 @@ async function ensureDefaults(){
   }
 }
 
+// ── LOAD DATA ─────────────────────────────────────
 async function loadData(){
   try{
     const settingsSnap = await getDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"));
@@ -567,10 +456,7 @@ async function loadData(){
     try{
       const localFoods = await fetch("./foods.json").then(r => r.ok ? r.json() : []);
       if(Array.isArray(localFoods) && localFoods.length) state.foods = localFoods.map(f => ({ active:true, verified:true, ...f }));
-    }catch(localErr){
-      console.warn("Local foods.json unavailable, using starter foods.", localErr);
-      state.foods = STARTER_FOODS;
-    }
+    }catch(e){ state.foods = STARTER_FOODS; }
     try{
       const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
       if(!foodsSnap.empty){
@@ -579,19 +465,15 @@ async function loadData(){
         firestoreFoods.forEach(f => map.set(f.id || f.name, f));
         state.foods = Array.from(map.values());
       }
-    }catch(foodErr){
-      console.warn("Firestore food library unavailable; using local foods.json.", foodErr);
-    }
+    }catch(e){ console.warn("Firestore foods unavailable.", e); }
     try{
       const unlockSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
       state.unlockedBadges = new Set(unlockSnap.docs.map(d => d.id));
-    }catch(badgeErr){
-      console.warn("Badge unlocks unavailable yet.", badgeErr);
-      state.unlockedBadges = new Set();
-    }
+    }catch(e){ state.unlockedBadges = new Set(); }
   }catch(err){ console.warn("Data load issue:", err); }
 }
 
+// ── LAYOUT ────────────────────────────────────────
 function layout(content, active="home"){
   $app.innerHTML = `
     <div class="screen">
@@ -605,7 +487,7 @@ function layout(content, active="home"){
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="build-tag">${BUILD}</span>
-          <button class="btn secondary" data-action="logout">Exit</button>
+          <button class="btn secondary" id="logoutBtn">Exit</button>
         </div>
       </div>
       ${content}
@@ -621,18 +503,20 @@ function layout(content, active="home"){
   `;
   bindGlobal();
 }
+
 function bindGlobal(){
   document.querySelectorAll("button").forEach(btn => {
     if(btn.dataset.tapBound) return;
     btn.dataset.tapBound = "1";
     btn.addEventListener("pointerdown", () => btn.classList.add("is-pressed"));
-    btn.addEventListener("pointerup", () => setTimeout(()=>btn.classList.remove("is-pressed"), 120));
+    btn.addEventListener("pointerup", () => setTimeout(()=>btn.classList.remove("is-pressed"),120));
     btn.addEventListener("pointerleave", () => btn.classList.remove("is-pressed"));
   });
   document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => { state.view = btn.dataset.view; render(); });
-  const logoutBtn = document.querySelector("[data-action='logout']");
-  if(logoutBtn) logoutBtn.onclick = () => signOut(auth);
+  const logoutBtn = document.getElementById("logoutBtn");
+  if(logoutBtn) logoutBtn.onclick = () => logout();
 }
+
 
 function renderHome(){
   const hour = new Date().getHours();
@@ -1188,7 +1072,7 @@ async function saveMealLog(extra={}){
     alreadyInjected: !!extra.alreadyInjected,
     alertLevel,
     createdAt: serverTimestamp(),
-    enteredBy: state.user.uid
+    enteredBy: state.roleKey
   });
   await unlockBadge("scarlet-sentinel");
   await unlockBadge("feast-reader");
@@ -1200,7 +1084,7 @@ async function saveMealLog(extra={}){
       reason:"Meal - adult confirmed",
       linkedMeal:true,
       createdAt:serverTimestamp(),
-      enteredBy:state.user.uid
+      enteredBy:state.roleKey
     });
   }
   if(extra.alreadyInjected) await createAlert("already_injected","orange",`Amara logged that she already injected ${estimatedDose} units Apidra.`);
@@ -1372,7 +1256,7 @@ async function saveHighFlow({ correctionSuggested=null, adultConfirmed=false, co
     correctionLogged,
     alertLevel:Number(state.highFlow.glucose)>=state.settings.urgentHighThreshold ? "red":"orange",
     createdAt:serverTimestamp(),
-    enteredBy:state.user.uid
+    enteredBy:state.roleKey
   });
   if(correctionLogged && correctionSuggested){
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
@@ -1380,7 +1264,7 @@ async function saveHighFlow({ correctionSuggested=null, adultConfirmed=false, co
       dose:Number(correctionSuggested),
       reason:"High sugar correction - adult confirmed",
       createdAt:serverTimestamp(),
-      enteredBy:state.user.uid
+      enteredBy:state.roleKey
     });
   }
   if(Number(state.highFlow.glucose) >= state.settings.urgentHighThreshold){
@@ -1529,7 +1413,7 @@ async function saveLowFlow(recheck){
     recheck:recheck || null,
     alertLevel:"red",
     createdAt:serverTimestamp(),
-    enteredBy:state.user.uid
+    enteredBy:state.roleKey
   });
   if(Number(state.lowFlow.glucose) < state.settings.lowThreshold){
     await createAlert("low","red",`Amara logged low glucose ${state.lowFlow.glucose}. Fast sugar: ${state.lowFlow.fastSugar || "not recorded"}. Adult: ${state.lowFlow.adult || "not recorded"}.`);
@@ -1563,7 +1447,7 @@ function renderInsulinLog(){
     const dose = Number(document.getElementById("dose").value);
     const reason = document.getElementById("reason").value;
     if(!dose || dose <=0) return toast("Please enter dose.");
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), { insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.user.uid });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), { insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.roleKey });
     if(type === "Apidra" && reason === "Correction") await createAlert("correction_logged","orange",`Amara logged correction insulin: ${dose} units Apidra.`);
     toast("Insulin log saved.");
     renderFlowDone({
@@ -1598,7 +1482,7 @@ function renderSymptoms(){
     const btn = document.getElementById("saveSymptoms");
     const restore = setBusy(btn, "Saving symptoms…");
     const arr = [...selected];
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"), { symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.user.uid });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"), { symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.roleKey });
     const severe = arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x));
     if(severe) { await unlockBadge("dark-signal-reader"); await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`); }
     restore();
@@ -1650,8 +1534,8 @@ function renderDiary(){
     const privacy = document.getElementById("privacy").value;
     if(!entry) return toast("Write a few words first.");
     const doneBusy = setBusy(document.getElementById("saveEntry"), "Saving entry…");
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), { mood, prompt, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), { mood, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), { mood, prompt, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.roleKey });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), { mood, privacy, createdAt:serverTimestamp(), enteredBy:state.roleKey });
     await unlockBadge("brave-page");
     if(["Sad","Angry","Scared","Lonely"].includes(mood)) { await unlockBadge("girl-who-stayed"); await unlockBadge("soft-monster-tamer"); }
     if(mood === "Sad" || mood === "Lonely") await unlockBadge("moonlit-heart");
@@ -1859,7 +1743,7 @@ function renderFoodLibrary(){
     if(!carbs || carbs <= 0) return toast("Please enter the carb amount.");
     const restore = setBusy(btn, "Saving…");
     try {
-      const newFood = { name, usualPortion:portion, usualCarbs:carbs, carbs, portion, calories, category, source:"Family Verified", verified:true, active:true, createdAt:serverTimestamp(), addedBy:state.user.uid };
+      const newFood = { name, usualPortion:portion, usualCarbs:carbs, carbs, portion, calories, category, source:"Family Verified", verified:true, active:true, createdAt:serverTimestamp(), addedBy:state.roleKey };
       await addDoc(collection(db,"families",FAMILY_ID,"foodLibrary"), newFood);
       state.foods.push(newFood);
       toast(`${name} saved to the family library.`);
@@ -2037,7 +1921,7 @@ async function renderScarletPages(){
 }
 
 async function addKetoneLog(glucose, ketoneResult){
-  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), { glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid, alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange" });
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), { glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.roleKey, alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange" });
 }
 async function createAlert(type, severity, message){
   await addDoc(collection(db,"families",FAMILY_ID,"alerts"), {
@@ -2049,7 +1933,7 @@ async function createAlert(type, severity, message){
     acknowledged:false,
     emailStatus:"pending_function_setup",
     createdAt:serverTimestamp(),
-    enteredBy: state.user?.uid || null
+    enteredBy: state.roleKey || null
   });
   await unlockBadge("signal-flame");
   if(severity === "red" || severity === "critical") await unlockBadge("three-guardians");
@@ -2213,7 +2097,7 @@ function renderDemoResetDone(counts){
     </div>
   `;
   document.getElementById("backAdultAfterReset").onclick = () => renderAdult();
-  document.getElementById("logoutAfterReset").onclick = () => signOut(auth);
+  document.getElementById("logoutAfterReset").onclick = () => logout();
 }
 
 function renderAdult(){
@@ -2321,30 +2205,28 @@ function renderAdult(){
       await updateDoc(doc(db,"families",FAMILY_ID,"alerts",btn.dataset.ack), {
         acknowledged:true,
         acknowledgedAt:serverTimestamp(),
-        acknowledgedBy:state.user?.uid || null
+        acknowledgedBy:state.roleKey || null
       });
       toast("Alert acknowledged.");
     });
   });
 }
 
-onAuthStateChanged(auth, async user => {
-  const justLoggedIn = sessionStorage.getItem("scarletJustLoggedIn") === "yes";
+// Auth handled by passcode system
 
-  // Avoid race condition while signInWithEmailAndPassword is still finishing.
-  if(state.loginInProgress || state.pendingRepair){
-    return;
-  }
-
-  if(user && justLoggedIn){
-    state.user = user;
-    state.role = localStorage.getItem("scarletRole") || "child";
+// ── SESSION RESTORE ON APP LOAD ──────────────────
+(async function init(){
+  const savedRole = localStorage.getItem("scarletRoleKey");
+  const savedRoleType = localStorage.getItem("scarletRole");
+  if(savedRole && savedRoleType){
+    // Restore session from localStorage
+    state.authenticated = true;
+    state.roleKey = savedRole;
+    state.role = savedRoleType;
+    await safeEnsureDefaults();
     await loadData();
     render();
-  }else{
-    if(user) await signOut(auth);
-    state.user = null;
-    state.role = null;
+  } else {
     renderLogin();
   }
-});
+})();
