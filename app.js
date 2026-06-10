@@ -1,18 +1,42 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore, collection, addDoc, setDoc, doc, getDoc, getDocs, query,
-  where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc, deleteDoc, writeBatch
+  where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc, deleteDoc, writeBatch,
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 import { firebaseConfig } from "./firebase-config.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Offline persistence: glucose/insulin logs save locally without signal and
+// sync to Firebase automatically when the connection returns.
+let db;
+try{
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  });
+}catch(e){
+  console.warn("Persistent cache unavailable, using default Firestore:", e);
+  db = getFirestore(app);
+}
+const auth = getAuth(app);
+
+// Sign in anonymously so Firestore security rules can require request.auth != null.
+// Enable "Anonymous" provider in Firebase Console → Authentication → Sign-in method.
+// Gracefully ignored if the provider isn't enabled yet.
+async function ensureFirebaseAuth(){
+  try{
+    if(!auth.currentUser) await signInAnonymously(auth);
+  }catch(e){
+    console.warn("Anonymous auth not enabled yet — see SETUP.md:", e?.code || e);
+  }
+}
 
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V4.1";
+const BUILD = "V5.0";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 // ── PASSCODE SYSTEM ──────────────────────────────
@@ -49,8 +73,10 @@ async function savePasscode(roleKey, code){
   });
 }
 
+let passcodesEnsured = false;
 async function ensurePasscodes(){
-  // Seeds default passcodes if they don't exist yet
+  // Seeds default passcodes if they don't exist yet (runs once per session)
+  if(passcodesEnsured) return;
   const defaults = { amara:"Amara16", mom:"Neri01", dad:"George13", tita:"Aileen07" };
   for(const [role, code] of Object.entries(defaults)){
     const snap = await getDoc(doc(db,"families",FAMILY_ID,"passcodes",role));
@@ -58,6 +84,7 @@ async function ensurePasscodes(){
       await savePasscode(role, code);
     }
   }
+  passcodesEnsured = true;
 }
 
 const DEFAULT_SETTINGS = {
@@ -74,7 +101,9 @@ const DEFAULT_SETTINGS = {
   lantusNightStart: "19:00",
   lantusNightEnd: "22:00",
   doseRounding: 1,
+  maxSingleDose: 15,
   lowThreshold: 70,
+  severeLowThreshold: 54,
   highThreshold: 250,
   urgentHighThreshold: 300,
   preMealCorrection180: 2,
@@ -157,9 +186,18 @@ function toast(msg){
   if(old) old.remove();
   const div = document.createElement("div");
   div.className = "toast";
+  div.setAttribute("role","status");
+  div.setAttribute("aria-live","polite");
   div.textContent = msg;
   document.body.appendChild(div);
   setTimeout(()=>div.remove(), 3000);
+}
+
+// ── LIVE LISTENER REGISTRY (prevents leaks) ──────
+let activeUnsubs = [];
+function detachListeners(){
+  activeUnsubs.forEach(u => { try{ u(); }catch(e){} });
+  activeUnsubs = [];
 }
 
 function setBusy(btn, text="Saving…"){
@@ -345,7 +383,7 @@ function renderLogin(){
                 autocomplete="current-password"
                 style="padding-right:48px"
               />
-              <button id="togglePasscode" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ash);font-size:18px;cursor:pointer;padding:4px">👁</button>
+              <button id="togglePasscode" aria-label="Show or hide passcode" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ash);font-size:18px;cursor:pointer;padding:4px">👁</button>
             </div>
             <button class="submit-btn" id="passcodeBtn">
               <span>🗝</span>
@@ -429,6 +467,7 @@ async function attemptLogin(){
   clearPasscodeError();
 
   try {
+    await ensureFirebaseAuth();
     // First time: seed passcodes if not yet in Firestore
     await ensurePasscodes();
 
@@ -503,6 +542,7 @@ async function showChangePin(){
 
 // ── LOGOUT ────────────────────────────────────────
 function logout(){
+  detachListeners();
   state.authenticated = false;
   state.role = null;
   state.roleKey = "";
@@ -584,13 +624,13 @@ function layout(content, active="home"){
         </div>
       </div>
       ${content}
-      <nav class="nav">
-        <button class="${active==="home"?"active":""}" data-view="home">Home</button>
-        <button class="${active==="meal"?"active":""}" data-view="meal">Meal</button>
-        <button class="${active==="foods"?"active":""}" data-view="foods">Foods</button>
-        <button class="${active==="diary"?"active":""}" data-view="diary">Entry</button>
-        <button class="${active==="vault"?"active":""}" data-view="vault">Vault</button>
-        <button class="${active==="reports"?"active":""}" data-view="reports">Reports</button>
+      <nav class="nav" aria-label="Main navigation">
+        <button class="${active==="home"?"active":""}" ${active==="home"?'aria-current="page"':''} data-view="home">Home</button>
+        <button class="${active==="meal"?"active":""}" ${active==="meal"?'aria-current="page"':''} data-view="meal">Meal</button>
+        <button class="${active==="foods"?"active":""}" ${active==="foods"?'aria-current="page"':''} data-view="foods">Foods</button>
+        <button class="${active==="diary"?"active":""}" ${active==="diary"?'aria-current="page"':''} data-view="diary">Entry</button>
+        <button class="${active==="vault"?"active":""}" ${active==="vault"?'aria-current="page"':''} data-view="vault">Vault</button>
+        <button class="${active==="reports"?"active":""}" ${active==="reports"?'aria-current="page"':''} data-view="reports">Reports</button>
       </nav>
     </div>
   `;
@@ -735,8 +775,29 @@ function renderMealGlucose(type){
     state.meal.glucose = g;
     if(g < state.settings.lowThreshold) return renderLowSugar(g);
     if(g >= state.settings.highThreshold) return renderKetonePrompt("meal");
+    // A correction dose would be added — first check for recent Apidra (stacking risk)
+    if(g > Number(state.settings.targetGlucose || 120)) return renderMealRecentApidra();
     renderFoodBuilder();
   };
+}
+
+function renderMealRecentApidra(){
+  const hours = state.settings.insulinStackingHours || 3;
+  layout(`
+    <div class="card warning">
+      <h2>One quick check</h2>
+      <p class="muted">Your sugar is above target, so a correction may be added. Did you take Apidra in the last ${hours} hours?</p>
+    </div>
+    <div class="grid single">
+      <button class="action" data-recent="no"><strong>No</strong><span>No Apidra in the last ${hours} hours.</span></button>
+      <button class="action" data-recent="yes"><strong>Yes</strong><span>Apidra may still be working. We will skip the auto-correction.</span></button>
+      <button class="action" data-recent="unknown"><strong>I'm not sure</strong><span>We will skip the auto-correction to be safe.</span></button>
+    </div>
+  `, "meal");
+  document.querySelectorAll("[data-recent]").forEach(btn => btn.onclick = () => {
+    state.meal.lastApidra = btn.dataset.recent;
+    renderFoodBuilder();
+  });
 }
 
 function renderKetonePrompt(next="meal"){
@@ -763,7 +824,7 @@ function renderKetonePrompt(next="meal"){
     if(g >= state.settings.urgentHighThreshold) await createAlert("urgent_high", "red", `Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
     else await createAlert("high", "orange", `Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
     if(btn.dataset.ketone === "Moderate / large") return renderEmergency("Moderate or large ketones need adult help now.");
-    if(next === "meal") renderFoodBuilder(); else renderHighSugarSafety();
+    if(next === "meal") renderMealRecentApidra(); else renderHighSugarSafety();
   });
 }
 
@@ -1109,16 +1170,26 @@ function getCorrection(glucose){
 function renderMealEstimate(){
   const carbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
   const carbDose = roundDose(carbs / Number(state.settings.carbRatio || 8));
-  const correction = getCorrection(Number(state.meal.glucose));
+  const stackingRisk = state.meal.lastApidra === "yes" || state.meal.lastApidra === "unknown";
+  const rawCorrection = getCorrection(Number(state.meal.glucose));
+  const correction = stackingRisk ? 0 : rawCorrection;
   const estimated = carbDose + correction;
+  const maxDose = Number(state.settings.maxSingleDose || 15);
+  const overCap = estimated > maxDose;
   layout(`
-    <div class="card estimate-hero" id="estimateHero">
+    <div class="card estimate-hero ${overCap ? "danger" : ""}" id="estimateHero">
       <p class="pill">Adult check required</p>
       <h2>Estimated Apidra</h2>
       <div class="dose-number">${estimated}</div>
       <p class="dose-unit">units</p>
+      ${overCap ? `<p class="small" style="margin-top:8px"><strong>⚠ Above the ${maxDose}-unit safety cap.</strong> Double-check the carb entries with an adult — this may be a typo.</p>` : ""}
       <p class="muted small">This is an estimate. Show this page to Mom, Dad, or Tita before injecting.</p>
     </div>
+    ${stackingRisk && rawCorrection > 0 ? `
+    <div class="card warning">
+      <h3>Correction skipped</h3>
+      <p class="muted small">Apidra ${state.meal.lastApidra === "yes" ? "was taken" : "may have been taken"} in the last ${state.settings.insulinStackingHours || 3} hours, so the auto-correction (+${rawCorrection} units) was not added. An adult can still adjust the final dose below.</p>
+    </div>` : ""}
     <div class="card">
       <h3>How this was estimated</h3>
       <div class="kv"><span>Meal</span><strong>${esc(state.meal.type || "Meal")}</strong></div>
@@ -1126,9 +1197,10 @@ function renderMealEstimate(){
       <div class="kv"><span>Total food carbs</span><strong>${carbs}g</strong></div>
       <div class="kv"><span>ICR — Insulin-to-Carbohydrate Ratio</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
       <div class="kv"><span>Food dose</span><strong>${carbDose} units</strong></div>
-      <div class="kv"><span>Correction dose</span><strong>+${correction} units</strong></div>
+      <div class="kv"><span>Correction dose</span><strong>+${correction} units${stackingRisk && rawCorrection > 0 ? " (skipped)" : ""}</strong></div>
       <div class="kv"><span>Target glucose</span><strong>${state.settings.targetGlucose || "—"} mg/dL</strong></div>
       <p class="small muted" style="margin-top:10px">Calories are for nutrition only. Dose estimate uses parent-set medical settings.</p>
+      <p class="small muted" style="margin-top:6px">This app supports — but never replaces — the dosing plan from Amara's doctor. When in doubt, follow the doctor's plan.</p>
     </div>
     <div class="card">
       <h3>Adult check</h3>
@@ -1148,7 +1220,9 @@ function renderMealEstimate(){
   document.getElementById("adultConfirmed").onclick = async () => {
     const btn = document.getElementById("adultConfirmed");
     const finalDose = Number(document.getElementById("adultFinalDose").value);
-    if(!finalDose || finalDose <= 0 || finalDose > 30) return toast("Please enter the adult-confirmed Apidra dose.");
+    const cap = Number(state.settings.maxSingleDose || 15);
+    if(!finalDose || finalDose <= 0) return toast("Please enter the adult-confirmed Apidra dose.");
+    if(finalDose > cap) return toast(`Dose is above the ${cap}-unit safety cap set in Medical Settings. An adult can raise the cap there if the doctor's plan allows it.`);
     const restore = setBusy(btn, "Saving and starting timer…");
     try{
       await saveMealLog({ adultConfirmed:true, actualDose:finalDose, autoLogInsulin:true, startTimer:true });
@@ -1171,7 +1245,8 @@ function renderMealEstimate(){
 async function saveMealLog(extra={}){
   const carbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
   const carbDose = roundDose(carbs / Number(state.settings.carbRatio || 8));
-  const correctionDose = getCorrection(Number(state.meal.glucose));
+  const stackingRisk = state.meal.lastApidra === "yes" || state.meal.lastApidra === "unknown";
+  const correctionDose = stackingRisk ? 0 : getCorrection(Number(state.meal.glucose));
   const estimatedDose = carbDose + correctionDose;
   const alertLevel = state.meal.glucose >= state.settings.urgentHighThreshold ? "red" : state.meal.glucose >= state.settings.highThreshold ? "orange" : "green";
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs"), {
@@ -1183,6 +1258,7 @@ async function saveMealLog(extra={}){
     actualDose: extra.actualDose ?? null,
     adultConfirmed: !!extra.adultConfirmed,
     hiddenCarbsChecked: !!state.meal.hiddenChecked,
+    recentApidra: state.meal.lastApidra || "unknown",
     ketones: state.meal.ketones || null,
     alreadyInjected: !!extra.alreadyInjected,
     alertLevel,
@@ -1479,8 +1555,41 @@ function renderLowSugar(preset=null){
     const g = Number(document.getElementById("lowGlucose").value);
     if(!g || g < 20 || g > 600) return toast("Please enter a valid glucose number.");
     state.lowFlow = { glucose:g, fastSugar:null, adult:null, recheck:null };
+    if(g < Number(state.settings.severeLowThreshold || 54)) return renderSevereLow();
     renderLowFastSugar();
   };
+}
+
+function renderSevereLow(){
+  const g = state.lowFlow.glucose;
+  // Auto-alert the whole Circle immediately — don't wait for a button press.
+  createAlert("severe_low","red",`EMERGENCY: Amara logged severely low glucose ${g} mg/dL. Check on her immediately.`).catch(()=>{});
+  layout(`
+    <div class="card danger">
+      <h2>Very Low: ${g} mg/dL</h2>
+      <p><strong>This is an emergency level. Your Circle has been alerted automatically.</strong></p>
+      <div class="divider-line"></div>
+      <p style="margin-top:10px"><strong>Do these now:</strong></p>
+      <p class="muted" style="margin-top:8px">1. Take fast sugar right away if you can swallow safely — juice, regular soda, glucose tablets.</p>
+      <p class="muted" style="margin-top:6px">2. Stay where an adult can see you. Do not be alone right now.</p>
+      <p class="muted" style="margin-top:6px">3. If you feel confused, very shaky, or cannot swallow — an adult must use glucagon if available and call emergency help.</p>
+      <p class="muted" style="margin-top:6px">4. <strong>No insulin.</strong></p>
+    </div>
+    <div class="grid single">
+      <button class="action scarlet" id="severeTookSugar"><strong>I took fast sugar</strong><span>Continue safety steps with an adult.</span></button>
+      ${CIRCLE.map(n => `<button class="action danger-action" data-severe-call="${n}"><strong>Alert ${n} again</strong><span>Send another alert now.</span></button>`).join("")}
+    </div>
+  `, "home");
+  document.getElementById("severeTookSugar").onclick = () => {
+    state.lowFlow.fastSugar = "fast sugar (severe low)";
+    renderLowAdult();
+  };
+  document.querySelectorAll("[data-severe-call]").forEach(btn => btn.onclick = async () => {
+    const restore = setBusy(btn, "Sending alert…");
+    await createAlert("severe_low","red",`EMERGENCY repeat: Amara is severely low at ${g} mg/dL and asked for ${btn.dataset.severeCall}.`);
+    restore();
+    toast(`${btn.dataset.severeCall} alerted.`);
+  });
 }
 
 function renderLowFastSugar(){
@@ -2339,14 +2448,36 @@ async function addKetoneLog(glucose, ketoneResult){
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), { glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.roleKey, alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange" });
 }
 async function createAlert(type, severity, message){
+  const recipients = (state.settings.alertEmails || []).filter(e => e && e.includes("@"));
+  let emailStatus = "no_recipients";
+  // Real email delivery via the Firebase "Trigger Email" extension, which watches
+  // the top-level "mail" collection. See SETUP.md → Step 2. Until the extension is
+  // installed, the mail doc simply sits unsent and the alert still shows on the
+  // adult dashboard.
+  if(recipients.length){
+    try{
+      await addDoc(collection(db,"mail"), {
+        to: recipients,
+        message: {
+          subject: `🩸 Scarlet Diaries ${severity === "red" ? "URGENT" : "Alert"}: ${type.replace(/_/g," ")}`,
+          text: `${message}\n\nTime: ${new Date().toLocaleString()}\nLogged by: ${state.roleKey || "unknown"}\n\nOpen the adult dashboard to acknowledge this alert.`
+        },
+        createdAt: serverTimestamp()
+      });
+      emailStatus = "queued_for_email";
+    }catch(e){
+      console.warn("Mail queue write failed:", e);
+      emailStatus = "email_queue_failed";
+    }
+  }
   await addDoc(collection(db,"families",FAMILY_ID,"alerts"), {
     childId:CHILD_ID,
     type,
     severity,
     message,
-    recipients: state.settings.alertEmails || [],
+    recipients,
     acknowledged:false,
-    emailStatus:"pending_function_setup",
+    emailStatus,
     createdAt:serverTimestamp(),
     enteredBy: state.roleKey || null
   });
@@ -2515,6 +2646,46 @@ function renderDemoResetDone(counts){
   document.getElementById("logoutAfterReset").onclick = () => logout();
 }
 
+// ── CSV EXPORT (for endocrinologist visits) ──────
+function csvCell(v){
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+}
+function downloadCSV(filename, rows){
+  const csv = rows.map(r => r.map(csvCell).join(",")).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type:"text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+async function exportCareData(days=30){
+  const since = new Date(Date.now() - days*24*60*60*1000);
+  const base = ["families",FAMILY_ID,"children",CHILD_ID];
+  const fetchCol = async name => {
+    const snap = await getDocs(query(collection(db,...base,name), orderBy("createdAt","desc"), limit(1000)));
+    return snap.docs.map(d => d.data()).filter(x => x.createdAt?.toDate && x.createdAt.toDate() >= since);
+  };
+  const [glucose, insulin, meals, ketones] = await Promise.all([
+    fetchCol("glucoseLogs"), fetchCol("insulinLogs"), fetchCol("mealLogs"), fetchCol("ketoneLogs")
+  ]);
+  const fmt = ts => ts?.toDate ? ts.toDate().toLocaleString() : "";
+  const rows = [["Date/Time","Type","Glucose mg/dL","Insulin","Dose (units)","Carbs (g)","Details","Entered by"]];
+  glucose.forEach(g => rows.push([fmt(g.createdAt),"Glucose check",g.glucose,"","","",`${g.context || ""}${g.recheck ? ` | recheck: ${g.recheck}` : ""}${g.fastSugar ? ` | fast sugar: ${g.fastSugar}` : ""}`,g.enteredBy || ""]));
+  insulin.forEach(i => rows.push([fmt(i.createdAt),"Insulin","",i.insulinType || "",i.dose ?? "","",i.reason || "",i.enteredBy || ""]));
+  meals.forEach(m => rows.push([fmt(m.createdAt),`Meal: ${m.mealType || ""}`,m.glucoseBeforeMeal ?? "","",m.actualDose ?? m.estimatedDose ?? "",m.totalCarbs ?? "",(m.items || []).map(x => `${x.name} (${x.carbs}g)`).join("; "),m.enteredBy || ""]));
+  ketones.forEach(k => rows.push([fmt(k.createdAt),"Ketone check",k.glucose ?? "","","","",k.ketoneResult || "",k.enteredBy || ""]));
+  // Sort by date descending (rows[0] is the header)
+  const header = rows.shift();
+  rows.sort((a,b) => new Date(b[0]) - new Date(a[0]));
+  rows.unshift(header);
+  downloadCSV(`amara-care-log-${days}d-${new Date().toISOString().slice(0,10)}.csv`, rows);
+  return rows.length - 1;
+}
+
 async function saveAdultMedicalSettings(){
   const next = {
     carbRatio:Number(document.getElementById("setCarbRatio").value || state.settings.carbRatio || 8),
@@ -2522,6 +2693,7 @@ async function saveAdultMedicalSettings(){
     correctionFactor:Number(document.getElementById("setCorrectionFactor").value || state.settings.correctionFactor || 50),
     insulinStackingHours:Number(document.getElementById("setActiveHours").value || state.settings.insulinStackingHours || 3),
     doseRounding:Number(document.getElementById("setDoseRounding").value || state.settings.doseRounding || 1),
+    maxSingleDose:Number(document.getElementById("setMaxDose").value || state.settings.maxSingleDose || 15),
     lantusMorningDose:Number(document.getElementById("setLantusMorning").value || state.settings.lantusMorningDose || 20),
     lantusNightDose:Number(document.getElementById("setLantusNight").value || state.settings.lantusNightDose || 8),
     highThreshold:Number(document.getElementById("setHighThreshold").value || state.settings.highThreshold || 250),
@@ -2591,14 +2763,25 @@ function renderAdult(){
       </div>
 
       <div class="card">
+        <h3>Export for the Doctor</h3>
+        <p class="muted small" style="margin-top:6px">Download glucose, insulin, meal, and ketone logs as a spreadsheet (CSV) to bring to checkups.</p>
+        <div class="grid" style="margin-top:12px">
+          <button class="action" id="export14"><strong>Last 14 days</strong><span>Download CSV.</span></button>
+          <button class="action" id="export30"><strong>Last 30 days</strong><span>Download CSV.</span></button>
+          <button class="action" id="export90"><strong>Last 90 days</strong><span>Download CSV.</span></button>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Medical Settings</h3>
-        <p class="muted small" style="margin-top:6px">Only change these if Amara’s doctor or care plan changed.</p>
+        <p class="muted small" style="margin-top:6px">Only change these if Amara’s doctor or care plan changed. These numbers should always match the endocrinologist's written plan.</p>
 
         <div class="field"><label>ICR — Insulin-to-Carbohydrate Ratio</label><input id="setCarbRatio" type="number" inputmode="decimal" value="${esc(state.settings.carbRatio || 8)}" /><p class="small muted">1 unit Apidra covers this many grams of carbs.</p></div>
         <div class="field"><label>Correction Factor</label><input id="setCorrectionFactor" type="number" inputmode="decimal" value="${esc(state.settings.correctionFactor || 50)}" /><p class="small muted">1 unit Apidra lowers glucose by this many mg/dL.</p></div>
         <div class="field"><label>Target Glucose</label><input id="setTargetGlucose" type="number" inputmode="numeric" value="${esc(state.settings.targetGlucose || 120)}" /></div>
         <div class="field"><label>Rapid Insulin Active Time</label><input id="setActiveHours" type="number" inputmode="decimal" value="${esc(state.settings.insulinStackingHours || 3)}" /><p class="small muted">Apidra may still be active during this window.</p></div>
         <div class="field"><label>Dose Rounding</label><input id="setDoseRounding" type="number" inputmode="decimal" value="${esc(state.settings.doseRounding || 1)}" /></div>
+        <div class="field"><label>Maximum Single Dose (safety cap)</label><input id="setMaxDose" type="number" inputmode="decimal" value="${esc(state.settings.maxSingleDose || 15)}" /><p class="small muted">Doses above this cannot be confirmed in the app. Catches typos like 450g of carbs.</p></div>
 
         <div class="divider-line"></div>
         <h3>Lantus / Long-Acting Insulin</h3>
@@ -2616,7 +2799,7 @@ function renderAdult(){
 
       <div class="card">
         <h3>Alert Emails</h3>
-        <p class="muted small" style="margin-top:6px;line-height:1.6">Alert records are saved in Firebase. Email delivery activates after deploying Firebase Functions.</p>
+        <p class="muted small" style="margin-top:6px;line-height:1.6">Every alert is queued for email to the Circle's addresses. Emails send automatically once the free "Trigger Email" extension is installed in Firebase (see SETUP.md). Until then, alerts appear only on this dashboard — check it often.</p>
       </div>
 
       <div class="card danger">
@@ -2632,6 +2815,19 @@ function renderAdult(){
   if(openReportsBtn) openReportsBtn.onclick = () => renderReports();
   const openVaultAdult = document.getElementById("openVaultAdult");
   if(openVaultAdult) openVaultAdult.onclick = () => renderVault();
+  [["export14",14],["export30",30],["export90",90]].forEach(([id, days]) => {
+    const b = document.getElementById(id);
+    if(b) b.onclick = async () => {
+      const restore = setBusy(b, "Preparing CSV…");
+      try{
+        const n = await exportCareData(days);
+        toast(n ? `Downloaded ${n} records.` : "No records in that period yet.");
+      }catch(e){
+        console.error("Export failed:", e);
+        toast("Export failed. Please try again.");
+      }finally{ restore(); }
+    };
+  });
   const saveSettingsBtn = document.getElementById("saveMedicalSettings");
   if(saveSettingsBtn) saveSettingsBtn.onclick = async () => {
     const restore = setBusy(saveSettingsBtn, "Saving settings…");
@@ -2639,7 +2835,8 @@ function renderAdult(){
   };
 
   const alertsRef = collection(db,"families",FAMILY_ID,"alerts");
-  onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
+  detachListeners();
+  const unsubAlerts = onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
     const list = document.getElementById("alertsList");
     if(!list) return;
     if(snap.empty){ list.innerHTML = `<p class="muted small">No alerts yet.</p>`; return; }
@@ -2668,15 +2865,18 @@ function renderAdult(){
       toast("Alert acknowledged.");
     });
   });
+  activeUnsubs.push(unsubAlerts);
 }
 
 // Auth handled by passcode system
 
 // ── SESSION RESTORE ON APP LOAD ──────────────────
 (async function init(){
+  await ensureFirebaseAuth();
   const savedRole = localStorage.getItem("scarletRoleKey");
   const savedRoleType = localStorage.getItem("scarletRole");
-  if(savedRole && savedRoleType){
+  const validRole = savedRole && ROLES[savedRole] && roleType(savedRole) === savedRoleType;
+  if(validRole){
     // Restore session from localStorage
     state.authenticated = true;
     state.roleKey = savedRole;
@@ -2686,6 +2886,8 @@ function renderAdult(){
     state.moodCheckedThisSession = false;
     if(!maybeStartChildMoodCheck("open")) render();
   } else {
+    localStorage.removeItem("scarletRole");
+    localStorage.removeItem("scarletRoleKey");
     renderLogin();
   }
 })();
