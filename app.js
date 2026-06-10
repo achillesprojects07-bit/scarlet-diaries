@@ -36,7 +36,7 @@ async function ensureFirebaseAuth(){
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V5.0";
+const BUILD = "V5.0.1";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 // ── PASSCODE SYSTEM ──────────────────────────────
@@ -648,6 +648,7 @@ function bindGlobal(){
   document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => { state.view = btn.dataset.view; render(); });
   const logoutBtn = document.getElementById("logoutBtn");
   if(logoutBtn) logoutBtn.onclick = () => logout();
+  document.querySelectorAll('[data-action="logout"]').forEach(btn => btn.onclick = () => logout());
 }
 
 

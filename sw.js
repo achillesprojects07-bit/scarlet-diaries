@@ -4,7 +4,7 @@
 //   - Firebase SDK from gstatic: cache-first (versioned URLs never change)
 //   - Firestore API calls: never intercepted (Firestore has its own offline handling)
 
-const CACHE = "scarlet-v5.0";
+const CACHE = "scarlet-v5.0.1";
 const SHELL = [
   "./",
   "./index.html",
