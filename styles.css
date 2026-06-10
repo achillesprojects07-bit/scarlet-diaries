@@ -1001,3 +1001,74 @@ button.added, .btn.added {
 .create-small + .small { color:var(--ash); font-size:11px; letter-spacing:0.5px; }
 .login-card .card { margin:4px 0; }
 .login-card .kv strong { word-break:break-word; text-align:right; }
+
+/* ═══════════════════════════════════════════════
+   V4.1 Integrated Safety + Clarity Additions
+   Preserves Scarlet identity; clarifies safety colors.
+   ═══════════════════════════════════════════════ */
+.section-label{
+  color:var(--ash);
+  letter-spacing:1.5px;
+  text-transform:uppercase;
+  padding:0 2px;
+  margin-top:4px;
+}
+.action.action-meal{
+  background:linear-gradient(135deg, var(--blood) 0%, var(--scarlet) 58%, var(--rose) 100%);
+  color:#fff;
+  border-color:rgba(240,96,112,0.45);
+  box-shadow:0 4px 20px rgba(122,0,18,0.38);
+}
+.action.action-low{
+  background:linear-gradient(135deg, rgba(154,21,32,0.26), rgba(192,25,42,0.18));
+  border-color:rgba(192,25,42,0.50);
+}
+.action.action-high{
+  background:linear-gradient(135deg, rgba(184,92,32,0.24), rgba(201,168,76,0.14));
+  border-color:rgba(184,92,32,0.48);
+}
+.action.action-lantus{
+  background:linear-gradient(135deg, rgba(201,168,76,0.28), rgba(232,201,106,0.12));
+  border-color:rgba(201,168,76,0.52);
+}
+.action.action-diary{
+  background:linear-gradient(135deg, rgba(74,21,53,0.30), rgba(176,28,46,0.10));
+  border-color:rgba(106,32,80,0.48);
+}
+.action.action-vault{
+  background:linear-gradient(135deg, rgba(201,168,76,0.20), rgba(74,21,53,0.18));
+  border-color:rgba(201,168,76,0.36);
+}
+.action.action-feeling{
+  min-height:82px;
+}
+.timer-number{
+  font-variant-numeric:tabular-nums;
+}
+.card.estimate-hero .kv strong,
+.estimate-hero .dose-number{
+  word-break:break-word;
+}
+.food-results:empty::before{
+  content:"Choose a food group or search.";
+  display:block;
+  color:var(--ash);
+  font-size:13px;
+}
+@media (prefers-color-scheme: dark){
+  body{
+    background-image:
+      radial-gradient(ellipse 120% 60% at 50% 0%, #240914 0%, transparent 65%),
+      radial-gradient(circle at 18% 100%, rgba(122,0,18,0.12) 0%, transparent 40%),
+      radial-gradient(circle at 85% 20%, rgba(201,168,76,0.06) 0%, transparent 35%);
+  }
+}
+body.night-theme, .night-theme{
+  --ink:#070407;
+  --ink2:#110713;
+  --ink3:#1d0b1a;
+  --surface:rgba(255,255,255,0.04);
+  --surface2:rgba(255,255,255,0.07);
+  --border:rgba(201,168,76,0.20);
+  --border2:rgba(201,168,76,0.30);
+}

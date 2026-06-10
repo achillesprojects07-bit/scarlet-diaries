@@ -12,7 +12,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID = "amara";
 const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V4.0";
+const BUILD = "V4.1";
 const CIRCLE = ["Mom", "Dad", "Tita"];
 
 // ── PASSCODE SYSTEM ──────────────────────────────
@@ -65,6 +65,14 @@ const DEFAULT_SETTINGS = {
   rapidInsulin: "Apidra",
   basalInsulin: "Lantus",
   carbRatio: 8,
+  targetGlucose: 120,
+  correctionFactor: 50,
+  lantusMorningDose: 20,
+  lantusNightDose: 8,
+  lantusMorningStart: "06:00",
+  lantusMorningEnd: "10:00",
+  lantusNightStart: "19:00",
+  lantusNightEnd: "22:00",
   doseRounding: 1,
   lowThreshold: 70,
   highThreshold: 250,
@@ -131,8 +139,13 @@ let state = {
   foodTab:"Breakfast Favorites",
   foodCategory:"All",
   foodSearch:"",
-  meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" }
+  meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" },
+  moodCheckedThisSession:false
 };
+
+let lastHiddenAt = null;
+let activeTimerInterval = null;
+let audioUnlocked = false;
 
 const $app = document.getElementById("app");
 
@@ -164,6 +177,82 @@ function scrollToTopSoon(){
   setTimeout(() => window.scrollTo({ top:0, behavior:"smooth" }), 80);
 }
 
+function unlockAudio(){
+  audioUnlocked = true;
+  try{
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if(AudioContext && !window.__scarletAudioContext){
+      window.__scarletAudioContext = new AudioContext();
+      if(window.__scarletAudioContext.state === "suspended") window.__scarletAudioContext.resume();
+    }
+  }catch(e){}
+}
+
+function playDiaryChime(){
+  try{
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if(!AudioContext) return;
+    const ctx = window.__scarletAudioContext || new AudioContext();
+    window.__scarletAudioContext = ctx;
+    if(ctx.state === "suspended") ctx.resume();
+
+    const now = ctx.currentTime;
+    [523.25, 659.25, 783.99].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, now + idx * 0.16);
+      gain.gain.setValueAtTime(0.0001, now + idx * 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + idx * 0.16 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.16 + 0.42);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + idx * 0.16);
+      osc.stop(now + idx * 0.16 + 0.45);
+    });
+  }catch(err){
+    console.warn("Chime unavailable:", err);
+  }
+}
+
+function inTimeWindow(now, start, end){
+  const [sh, sm] = String(start || "00:00").split(":").map(Number);
+  const [eh, em] = String(end || "23:59").split(":").map(Number);
+  const current = now.getHours() * 60 + now.getMinutes();
+  const s = sh * 60 + (sm || 0);
+  const e = eh * 60 + (em || 0);
+  if(s <= e) return current >= s && current <= e;
+  return current >= s || current <= e;
+}
+
+function getLantusPeriod(){
+  const now = new Date();
+  if(inTimeWindow(now, state.settings.lantusMorningStart, state.settings.lantusMorningEnd)) return "morning";
+  if(inTimeWindow(now, state.settings.lantusNightStart, state.settings.lantusNightEnd)) return "night";
+  return now.getHours() < 12 ? "morning_outside_window" : "night_outside_window";
+}
+
+function maybeStartChildMoodCheck(reason="open"){
+  if(state.role !== "child") return false;
+  if(state.view === "mood") return false;
+  const now = Date.now();
+  const lastMoodAt = Number(sessionStorage.getItem("scarletLastMoodAt") || 0);
+  const dueByResume = reason === "resume" && (!lastMoodAt || now - lastMoodAt > 10 * 60 * 1000);
+  const dueByOpen = reason === "open" && !state.moodCheckedThisSession;
+  if(dueByOpen || dueByResume){
+    state.view = "mood";
+    render();
+    return true;
+  }
+  return false;
+}
+
+function returnToDashboard(){
+  state.view = "home";
+  render();
+}
+
+
 function renderFlowDone({title="Saved", message="", next=[]} = {}){
   layout(`
     <div class="card success">
@@ -194,13 +283,14 @@ function render(){
     case "meal":    return renderMealStart();
     case "high":    return renderHighSugar();
     case "low":     return renderLowSugar();
-    case "insulin": return renderInsulinLog();
+    case "lantus":  return renderLantusLog();
+    case "insulin": return renderLantusLog();
     case "feel":    return renderSymptoms();
     case "diary":   return renderDiary();
     case "vault":   return renderVault();
     case "circle":  return renderCircle();
     case "foods":   return renderFoodLibrary();
-    case "mood":    return renderMoodMirror();
+    case "mood":    return renderHowIFeel();
     case "reports": return renderReports();
     case "pages":   return renderScarletPages();
     default:        return renderHome();
@@ -360,7 +450,8 @@ async function attemptLogin(){
 
     await safeEnsureDefaults();
     await loadData();
-    render();
+    state.moodCheckedThisSession = false;
+    if(!maybeStartChildMoodCheck("open")) render();
 
   } catch(err){
     console.error("Login error:", err);
@@ -475,6 +566,8 @@ async function loadData(){
 
 // ── LAYOUT ────────────────────────────────────────
 function layout(content, active="home"){
+  const hour = new Date().getHours();
+  document.body.classList.toggle("night-theme", hour >= 19 || hour < 6);
   $app.innerHTML = `
     <div class="screen">
       <div class="topbar">
@@ -530,60 +623,60 @@ function renderHome(){
           <h2 class="hello-title" style="font-size:24px">Hello, Amara.</h2>
         </div>
       </div>
-      <p class="tagline" style="text-align:left;font-size:11px;letter-spacing:2.5px">What does your body need?</p>
+      <p class="tagline" style="text-align:left;font-size:11px;letter-spacing:2.5px">What do you need now?</p>
       <div class="divider-line" style="margin-top:14px"></div>
-      <p class="small" style="color:var(--ash);line-height:1.6;margin-top:10px">Always show the suggested dose to your Circle before injecting.</p>
+      <p class="small" style="color:var(--ash);line-height:1.6;margin-top:10px">Apidra and Lantus are separate. If you are unsure, ask Mom, Dad, or Tita.</p>
     </div>
 
-    <p class="small" style="color:var(--ash);letter-spacing:1.5px;text-transform:uppercase;padding:0 2px">Safety</p>
+    <p class="small section-label">Safety</p>
     <div class="grid">
-      <button class="action scarlet" data-go="meal" style="grid-column:1/-1;min-height:80px">
-        <strong style="font-size:17px">\uD83E\uDE78 Before I Eat</strong>
-        <span>Check sugar &middot; Choose food &middot; See suggested dose</span>
+      <button class="action action-meal" data-go="meal" style="grid-column:1/-1;min-height:82px">
+        <strong style="font-size:17px">Before I Eat</strong>
+        <span>Choose meal · Check sugar · Add food · Adult checks dose</span>
       </button>
-      <button class="action" data-go="high">
-        <strong>\uD83D\uDD25 Sugar Is High</strong>
-        <span>Slow down. Check safety. Alert the Circle.</span>
+      <button class="action action-low" data-go="low">
+        <strong>My Sugar Is Low</strong>
+        <span>No insulin now. Help your body first.</span>
       </button>
-      <button class="action" data-go="low">
-        <strong>\u2744\uFE0F Sugar Is Low</strong>
-        <span>No insulin now. Protect yourself first.</span>
+      <button class="action action-high" data-go="high">
+        <strong>My Sugar Is High</strong>
+        <span>Check active Apidra before any correction.</span>
       </button>
-      <button class="action" data-go="insulin">
-        <strong>\uD83D\uDC89 I Took Insulin</strong>
-        <span>Log Apidra or Lantus.</span>
+      <button class="action action-lantus" data-go="lantus">
+        <strong>My Lantus</strong>
+        <span>Long-acting insulin only.</span>
       </button>
       <button class="action" data-go="feel">
-        <strong>\uD83E\uDEB7 Don\'t Feel Well</strong>
-        <span>Tell the diary how you feel.</span>
+        <strong>I Don’t Feel Well</strong>
+        <span>Tell the diary what your body feels.</span>
       </button>
     </div>
 
-    <p class="small" style="color:var(--ash);letter-spacing:1.5px;text-transform:uppercase;padding:0 2px;margin-top:4px">Your Diary</p>
+    <p class="small section-label">Your Diary</p>
     <div class="grid">
-      <button class="action plum" data-go="diary" style="grid-column:1/-1">
-        <strong>Write a Scarlet Entry</strong>
-        <span>Give your feelings a place to go.</span>
+      <button class="action action-diary" data-go="diary" style="grid-column:1/-1">
+        <strong>Scarlet Entry</strong>
+        <span>Write what you want to remember, release, or say.</span>
       </button>
-      <button class="action plum" data-go="pages">
-        <strong>My Scarlet Pages</strong>
-        <span>Reread your words.</span>
+      <button class="action action-diary" data-go="pages">
+        <strong>Scarlet Pages</strong>
+        <span>Your saved entries.</span>
       </button>
-      <button class="action plum" data-go="vault">
+      <button class="action action-vault" data-go="vault">
         <strong>The Scarlet Vault</strong>
-        <span>Your courage marks.</span>
+        <span>Your courage marks and badges.</span>
       </button>
     </div>
 
-    <p class="small" style="color:var(--ash);letter-spacing:1.5px;text-transform:uppercase;padding:0 2px;margin-top:4px">More</p>
+    <p class="small section-label">More</p>
     <div class="grid">
       <button class="action" data-go="foods">
         <strong>Food Library</strong>
-        <span>Favorites, saved, packaged foods.</span>
+        <span>Favorites, portions, and saved foods.</span>
       </button>
       <button class="action" data-go="mood">
-        <strong>Mood Mirror</strong>
-        <span>See feelings without shame.</span>
+        <strong>How I Feel</strong>
+        <span>Check in without shame.</span>
       </button>
       <button class="action" data-go="reports">
         <strong>Reports</strong>
@@ -591,15 +684,15 @@ function renderHome(){
       </button>
       <button class="action" data-go="circle">
         <strong>Call My Circle</strong>
-        <span>Mom &middot; Dad &middot; Tita</span>
+        <span>Mom · Dad · Tita</span>
       </button>
     </div>
 
-    <div class="card" style="text-align:center;padding:14px;background:rgba(122,0,18,0.06)">
-      <p class="small" style="color:var(--ash);font-style:italic;line-height:1.6;font-family:var(--font-serif);font-size:15px">&ldquo;Every drop. Every breath. Unstoppable.&rdquo;</p>
+    <div class="card" style="padding:14px;background:rgba(122,0,18,0.06)">
+      <p class="small" style="color:var(--ash);line-height:1.6">Badges, Scarlet Entry, Scarlet Pages, food library, reports, and safety alerts are preserved in this integrated build.</p>
     </div>
   `, "home");
-  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { state.view = b.dataset.go; render(); });
+  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { unlockAudio(); state.view = b.dataset.go; render(); });
 }
 
 
@@ -607,15 +700,17 @@ function renderMealStart(){
   state.meal = { type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" };
   layout(`
     <div class="card">
+      <button class="btn secondary" id="backFromMealStart" style="margin-bottom:12px">← Back Home</button>
       <h2>Before I Eat</h2>
-      <p class="muted">First, choose what you’re having.</p>
+      <p class="muted">First, choose the meal. Then we check sugar, add food, and show the Apidra estimate on its own page.</p>
     </div>
     <div class="grid">
-      ${["Morning Meal","Midday Meal","Evening Meal","Small Bite"].map(m => `
-        <button class="action" data-meal="${m}"><strong>${m}</strong><span>Start meal safety steps.</span></button>
+      ${["Breakfast","Lunch","Dinner","Snack"].map(m => `
+        <button class="action action-meal" data-meal="${m}"><strong>${m}</strong><span>Start meal safety steps.</span></button>
       `).join("")}
     </div>
   `, "meal");
+  document.getElementById("backFromMealStart").onclick = returnToDashboard;
   document.querySelectorAll("[data-meal]").forEach(btn => btn.onclick = () => renderMealGlucose(btn.dataset.meal));
 }
 
@@ -623,15 +718,17 @@ function renderMealGlucose(type){
   state.meal.type = type;
   layout(`
     <div class="card">
+      <button class="btn secondary" id="backToMealType" style="margin-bottom:12px">← Back to meals</button>
       <h2>${esc(type)}</h2>
-      <p class="muted">What is your sugar before eating?</p>
+      <p class="muted">What is your sugar right now, before eating?</p>
       <div class="field">
-        <label>Pre-meal glucose mg/dL</label>
+        <label>Current sugar mg/dL</label>
         <input id="glucose" type="number" inputmode="numeric" placeholder="Example: 145" />
       </div>
-      <button class="btn scarlet full" id="continueMeal">Continue</button>
+      <button class="btn scarlet full" id="continueMeal">Continue to food</button>
     </div>
   `, "meal");
+  document.getElementById("backToMealType").onclick = renderMealStart;
   document.getElementById("continueMeal").onclick = () => {
     const g = Number(document.getElementById("glucose").value);
     if(!g || g < 20 || g > 600) return toast("Please enter a valid glucose number.");
@@ -998,8 +1095,14 @@ function renderHiddenCarbs(){
 
 function roundDose(raw){ const unit = Number(state.settings.doseRounding || 1); return Math.round(raw / unit) * unit; }
 function getCorrection(glucose){
-  if(glucose > 250) return Number(state.settings.preMealCorrection250 || 4);
-  if(glucose > 180) return Number(state.settings.preMealCorrection180 || 2);
+  const g = Number(glucose || 0);
+  const target = Number(state.settings.targetGlucose || 0);
+  const factor = Number(state.settings.correctionFactor || 0);
+  if(target > 0 && factor > 0 && g > target){
+    return roundDose((g - target) / factor);
+  }
+  if(g > 250) return Number(state.settings.preMealCorrection250 || 4);
+  if(g > 180) return Number(state.settings.preMealCorrection180 || 2);
   return 0;
 }
 
@@ -1010,40 +1113,52 @@ function renderMealEstimate(){
   const estimated = carbDose + correction;
   layout(`
     <div class="card estimate-hero" id="estimateHero">
-      <p class="pill">Suggested only</p>
-      <h2>Suggested Apidra</h2>
+      <p class="pill">Adult check required</p>
+      <h2>Estimated Apidra</h2>
       <div class="dose-number">${estimated}</div>
       <p class="dose-unit">units</p>
-      <p class="muted small">Confirm with an adult before injecting.</p>
+      <p class="muted small">This is an estimate. Show this page to Mom, Dad, or Tita before injecting.</p>
     </div>
     <div class="card">
       <h3>How this was estimated</h3>
-      <div class="kv"><span>Pre-meal glucose</span><strong>${state.meal.glucose} mg/dL</strong></div>
-      <div class="kv"><span>Total carbs</span><strong>${carbs}g</strong></div>
-      <div class="kv"><span>Carb ratio</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
-      <div class="kv"><span>Carb dose rounded</span><strong>${carbDose} units</strong></div>
-      <div class="kv"><span>Glucose correction</span><strong>+${correction} units</strong></div>
-      <p class="small muted" style="margin-top:10px">Insulin is calculated from carbs plus the saved family correction plan. Calories are for nutrition only.</p>
+      <div class="kv"><span>Meal</span><strong>${esc(state.meal.type || "Meal")}</strong></div>
+      <div class="kv"><span>Current sugar</span><strong>${state.meal.glucose} mg/dL</strong></div>
+      <div class="kv"><span>Total food carbs</span><strong>${carbs}g</strong></div>
+      <div class="kv"><span>ICR — Insulin-to-Carbohydrate Ratio</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
+      <div class="kv"><span>Food dose</span><strong>${carbDose} units</strong></div>
+      <div class="kv"><span>Correction dose</span><strong>+${correction} units</strong></div>
+      <div class="kv"><span>Target glucose</span><strong>${state.settings.targetGlucose || "—"} mg/dL</strong></div>
+      <p class="small muted" style="margin-top:10px">Calories are for nutrition only. Dose estimate uses parent-set medical settings.</p>
     </div>
-    <div class="grid single">
-      <button class="action scarlet" id="adultConfirmed"><strong>Adult confirmed</strong><span>Save meal and automatically log Apidra.</span></button>
-      ${CIRCLE.map(name => `<button class="action" data-call="${name}"><strong>I need ${name}</strong><span>Alert the Circle before dosing.</span></button>`).join("")}
-      <button class="action" id="saveNoInsulin"><strong>Save without insulin</strong><span>Save meal only for adult review.</span></button>
-      <button class="action" id="backFoodFromEstimate"><strong>Back to food</strong><span>Change or add food.</span></button>
+    <div class="card">
+      <h3>Adult check</h3>
+      <p class="muted small">An adult can confirm the estimate, change the dose, or choose no insulin right now.</p>
+      <div class="field">
+        <label>Final Apidra dose confirmed by adult</label>
+        <input id="adultFinalDose" type="number" inputmode="decimal" value="${estimated}" />
+      </div>
+      <div class="grid single">
+        <button class="action scarlet" id="adultConfirmed"><strong>Confirm dose</strong><span>Save meal, log Apidra, then start the 15-minute wait timer.</span></button>
+        <button class="action" id="saveNoInsulin"><strong>No insulin right now</strong><span>Save meal only for adult review.</span></button>
+        ${CIRCLE.map(name => `<button class="action" data-call="${name}"><strong>I need ${name}</strong><span>Alert the Circle before dosing.</span></button>`).join("")}
+        <button class="action" id="backFoodFromEstimate"><strong>Back to food</strong><span>Change or add food.</span></button>
+      </div>
     </div>
   `, "meal");
   document.getElementById("adultConfirmed").onclick = async () => {
     const btn = document.getElementById("adultConfirmed");
-    const restore = setBusy(btn, "Saving meal and insulin…");
+    const finalDose = Number(document.getElementById("adultFinalDose").value);
+    if(!finalDose || finalDose <= 0 || finalDose > 30) return toast("Please enter the adult-confirmed Apidra dose.");
+    const restore = setBusy(btn, "Saving and starting timer…");
     try{
-      await saveMealLog({ adultConfirmed:true, actualDose:estimated, autoLogInsulin:true });
+      await saveMealLog({ adultConfirmed:true, actualDose:finalDose, autoLogInsulin:true, startTimer:true });
     }finally{
       restore();
     }
   };
   document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => {
     const restore = setBusy(b, "Sending alert…");
-    await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Suggested Apidra: ${estimated} units.`);
+    await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Estimated Apidra: ${estimated} units.`);
     await unlockBadge("caller-circle");
     restore();
     toast(`${b.dataset.call} alert saved.`);
@@ -1088,16 +1203,83 @@ async function saveMealLog(extra={}){
     });
   }
   if(extra.alreadyInjected) await createAlert("already_injected","orange",`Amara logged that she already injected ${estimatedDose} units Apidra.`);
-  toast(extra.autoLogInsulin ? "Meal saved. Insulin logged." : "Meal saved.");
+  toast(extra.autoLogInsulin ? "Meal saved. Apidra logged." : "Meal saved.");
+  if(extra.autoLogInsulin && extra.startTimer){
+    return renderApidraWaitTimer(actualDose);
+  }
   renderFlowDone({
-    title: extra.autoLogInsulin ? "Meal saved. Insulin logged." : "Meal saved",
+    title: extra.autoLogInsulin ? "Meal saved. Apidra logged." : "Meal saved",
     message: extra.autoLogInsulin ? `Adult confirmed. Apidra logged: ${actualDose} unit(s).` : "Meal saved without insulin. Adult should review.",
     next:[
-      {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."},
-      {view:"pages",title:"My Scarlet Pages",sub:"Reread your entries."}
+      {view:"diary",title:"Scarlet Entry",sub:"Say how this felt."},
+      {view:"pages",title:"Scarlet Pages",sub:"Reread your entries."}
     ]
   });
 }
+
+
+function renderApidraWaitTimer(dose){
+  const totalSeconds = 15 * 60;
+  let remaining = totalSeconds;
+  clearInterval(activeTimerInterval);
+  layout(`
+    <div class="card estimate-hero">
+      <p class="pill">Apidra saved</p>
+      <h2>Wait before eating</h2>
+      <div class="dose-number timer-number" id="timerText">15:00</div>
+      <p class="dose-unit">minutes</p>
+      <p class="muted small">Dose logged: ${dose} unit(s) Apidra. Wait 15 minutes, then eat.</p>
+    </div>
+    <div class="grid single">
+      <button class="action scarlet" id="startedEating"><strong>I started eating</strong><span>Save timer completion and return home.</span></button>
+      <button class="action danger-action" id="feelLowDuringTimer"><strong>I feel low</strong><span>Go to low sugar help now.</span></button>
+      <button class="action" id="needHelpTimer"><strong>I need help</strong><span>Call Mom, Dad, or Tita.</span></button>
+    </div>
+  `, "meal");
+
+  const update = () => {
+    const el = document.getElementById("timerText");
+    if(!el) return clearInterval(activeTimerInterval);
+    const m = Math.floor(remaining / 60);
+    const sec = String(remaining % 60).padStart(2,"0");
+    el.textContent = `${m}:${sec}`;
+    if(remaining <= 0){
+      clearInterval(activeTimerInterval);
+      playDiaryChime();
+      toast("Time to eat, Amara.");
+      el.textContent = "Time";
+      addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"timerLogs"), {
+        type:"apidra_wait",
+        dose:Number(dose),
+        status:"finished",
+        createdAt:serverTimestamp(),
+        enteredBy:state.roleKey
+      }).catch(console.warn);
+    }
+    remaining -= 1;
+  };
+  update();
+  activeTimerInterval = setInterval(update, 1000);
+
+  document.getElementById("startedEating").onclick = async () => {
+    clearInterval(activeTimerInterval);
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"timerLogs"), {
+      type:"apidra_wait",
+      dose:Number(dose),
+      status:"started_eating",
+      createdAt:serverTimestamp(),
+      enteredBy:state.roleKey
+    });
+    renderFlowDone({ title:"Timer saved", message:"Time to eat was saved.", next:[{view:"reports",title:"Reports",sub:"See logs later."}] });
+  };
+  document.getElementById("feelLowDuringTimer").onclick = () => {
+    clearInterval(activeTimerInterval);
+    state.view = "low";
+    renderLowSugar();
+  };
+  document.getElementById("needHelpTimer").onclick = () => { state.view = "circle"; render(); };
+}
+
 
 function renderHighSugar(){
   layout(`
@@ -1431,34 +1613,137 @@ async function saveLowFlow(recheck){
   });
 }
 
-function renderInsulinLog(){
+function renderLantusLog(){
+  const period = getLantusPeriod();
+  const isNight = period.startsWith("night");
+  const isMorning = period.startsWith("morning");
+  const outsideWindow = period.includes("outside");
+  const usualDose = isNight ? Number(state.settings.lantusNightDose || 8) : Number(state.settings.lantusMorningDose || 20);
+  const label = isNight ? "Tonight’s Lantus" : "Morning Lantus";
+  const timeNote = outsideWindow ? "This is outside the saved usual Lantus time. Ask an adult before continuing." : "Check the pen carefully before saving.";
   layout(`
+    <div class="card ${outsideWindow ? "warning" : "dark"}">
+      <button class="btn secondary" id="backFromLantus" style="margin-bottom:12px">← Back Home</button>
+      <h2>My Lantus</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Long-acting insulin only.</p>
+      <div class="divider-line"></div>
+      <div class="kv"><span>${label}</span><strong>${usualDose} units</strong></div>
+      <p class="muted small" style="margin-top:10px">${esc(timeNote)}</p>
+    </div>
     <div class="card">
-      <h2>I Took Insulin</h2>
-      <p class="muted">Log what happened. Honesty protects you.</p>
-      <div class="field"><label>Insulin</label><select id="insulinType"><option>Apidra</option><option>Lantus</option></select></div>
-      <div class="field"><label>Dose units</label><input id="dose" type="number" inputmode="decimal" placeholder="Example: 6" /></div>
-      <div class="field"><label>Reason</label><select id="reason"><option>Meal</option><option>Correction</option><option>Basal</option><option>I am not sure</option></select></div>
-      <button class="btn scarlet full" id="saveInsulin">Save insulin log</button>
+      <h3>Record Lantus</h3>
+      <div class="field">
+        <label>How many units does the pen show?</label>
+        <input id="lantusDose" type="number" inputmode="decimal" placeholder="Example: ${usualDose}" />
+      </div>
+      <div class="field">
+        <label>Adult check</label>
+        <select id="lantusAdult">
+          <option value="">Choose adult</option>
+          <option>Mom</option>
+          <option>Dad</option>
+          <option>Tita</option>
+        </select>
+      </div>
+      <button class="btn scarlet full" id="checkLantus">Check Lantus dose</button>
     </div>
   `, "home");
-  document.getElementById("saveInsulin").onclick = async () => {
-    const type = document.getElementById("insulinType").value;
-    const dose = Number(document.getElementById("dose").value);
-    const reason = document.getElementById("reason").value;
-    if(!dose || dose <=0) return toast("Please enter dose.");
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), { insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.roleKey });
-    if(type === "Apidra" && reason === "Correction") await createAlert("correction_logged","orange",`Amara logged correction insulin: ${dose} units Apidra.`);
-    toast("Insulin log saved.");
+
+  document.getElementById("backFromLantus").onclick = returnToDashboard;
+  document.getElementById("checkLantus").onclick = () => {
+    const dose = Number(document.getElementById("lantusDose").value);
+    const adult = document.getElementById("lantusAdult").value;
+    if(!dose || dose <= 0 || dose > 80) return toast("Please enter the Lantus dose.");
+    if(!adult) return toast("Please choose which adult checked.");
+    renderLantusConfirm({ dose, adult, period, usualDose, outsideWindow });
+  };
+}
+
+function renderInsulinLog(){
+  return renderLantusLog();
+}
+
+function renderLantusConfirm({ dose, adult, period, usualDose, outsideWindow }){
+  const isNight = period.startsWith("night");
+  const looksLikeMorningAtNight = isNight && Math.round(dose) === Math.round(Number(state.settings.lantusMorningDose || 20));
+  const overNightGuard = isNight && dose > Number(state.settings.lantusNightDose || 8) + 2;
+  const unusual = outsideWindow || Math.abs(dose - usualDose) > 1 || looksLikeMorningAtNight || overNightGuard;
+  const hardStop = looksLikeMorningAtNight || overNightGuard;
+  const title = hardStop ? "Stop and ask an adult" : unusual ? "Adult check needed" : "Confirm Lantus";
+  const message = looksLikeMorningAtNight
+    ? `This looks like the morning dose. Tonight’s usual Lantus is ${state.settings.lantusNightDose || 8} units.`
+    : unusual
+      ? `This is different from the usual ${usualDose} units for this time.`
+      : `You are about to save ${dose} units of Lantus.`;
+
+  layout(`
+    <div class="card ${hardStop ? "danger" : unusual ? "warning" : "success"}">
+      <h2>${esc(title)}</h2>
+      <p class="muted">${esc(message)}</p>
+      <div class="divider-line"></div>
+      <div class="kv"><span>Insulin</span><strong>Lantus</strong></div>
+      <div class="kv"><span>Time type</span><strong>${period.startsWith("night") ? "Night" : "Morning"}</strong></div>
+      <div class="kv"><span>Usual dose</span><strong>${usualDose} units</strong></div>
+      <div class="kv"><span>Entered dose</span><strong>${dose} units</strong></div>
+      <div class="kv"><span>Adult</span><strong>${esc(adult)}</strong></div>
+    </div>
+    ${hardStop ? `
+      <div class="card danger">
+        <h3>Adult unlock required</h3>
+        <p class="muted small">This dose will not be saved unless an adult enters their code.</p>
+        <div class="field"><label>Adult code</label><input id="adultUnlockCode" type="password" placeholder="Adult code" /></div>
+        <button class="btn red full" id="unlockAndSaveLantus">Adult unlock and save</button>
+      </div>
+    ` : ""}
+    <div class="grid single">
+      ${hardStop ? "" : `<button class="action scarlet" id="saveLantusNow"><strong>Yes, save Lantus</strong><span>I checked the pen and the adult checked.</span></button>`}
+      ${CIRCLE.map(n => `<button class="action" data-alert-lantus="${n}"><strong>Alert ${n}</strong><span>Ask for adult help.</span></button>`).join("")}
+      <button class="action" id="backLantusEdit"><strong>No, go back</strong><span>Change the dose.</span></button>
+    </div>
+  `, "home");
+
+  const save = async (override=false) => {
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
+      insulinType:"Lantus",
+      dose:Number(dose),
+      reason: period.startsWith("night") ? "Night long-acting" : "Morning long-acting",
+      adultCheckedBy:adult,
+      period,
+      unusualDose:unusual,
+      hardStopOverride:override,
+      createdAt:serverTimestamp(),
+      enteredBy:state.roleKey
+    });
+    if(unusual){
+      await createAlert("lantus_guardrail", hardStop ? "red" : "orange", `Lantus guardrail: ${dose} units entered for ${period}. Usual dose: ${usualDose}. Adult: ${adult}.`);
+    }
+    toast("Lantus saved.");
     renderFlowDone({
-      title:"Insulin log saved",
-      message:"The insulin dose was saved in Amara’s record.",
-      next:[
-        {view:"reports",title:"Reports",sub:"See summaries later."},
-        {view:"diary",title:"Write a Scarlet Entry",sub:"Say how today felt."}
-      ]
+      title:"Lantus saved",
+      message:`Saved ${dose} units of Lantus. ${unusual ? "Adult review alert was saved." : "Dose matched the usual setting."}`,
+      next:[{view:"reports",title:"Reports",sub:"See insulin logs."}]
     });
   };
+
+  const saveBtn = document.getElementById("saveLantusNow");
+  if(saveBtn) saveBtn.onclick = () => save(false);
+
+  const unlockBtn = document.getElementById("unlockAndSaveLantus");
+  if(unlockBtn) unlockBtn.onclick = async () => {
+    const code = document.getElementById("adultUnlockCode").value || "";
+    const adultKey = String(adult).toLowerCase();
+    const ok = await verifyPasscode(adultKey, code);
+    if(!ok) return toast("Adult code is not correct.");
+    await save(true);
+  };
+
+  document.querySelectorAll("[data-alert-lantus]").forEach(btn => btn.onclick = async () => {
+    const restore = setBusy(btn, "Sending alert…");
+    await createAlert("lantus_help", hardStop ? "red" : "orange", `Amara needs help with Lantus. Entered ${dose} units. Usual ${usualDose}. Alerted ${btn.dataset.alertLantus}.`);
+    restore();
+    toast(`${btn.dataset.alertLantus} alert saved.`);
+  });
+  document.getElementById("backLantusEdit").onclick = renderLantusLog;
 }
 
 function renderSymptoms(){
@@ -1545,25 +1830,155 @@ function renderDiary(){
   };
 }
 
-function renderMoodMirror(){
+const MOTIVATION_NUGGETS = [
+  "You can do this one step at a time.",
+  "You do not have to do this alone.",
+  "Your number is just information.",
+  "A high number is not your fault.",
+  "A low number means we help your body now.",
+  "Small steps count.",
+  "Let’s take care of you now.",
+  "You are safe to ask for help.",
+  "You are not in trouble.",
+  "Checking your sugar helps keep you safe.",
+  "You are more than your sugar number.",
+  "No need to rush. Let’s do this carefully.",
+  "You can tell the truth here.",
+  "Ask Mom, Dad, or Tita if you feel unsure.",
+  "Being safe is the goal.",
+  "You are doing a hard thing.",
+  "We can fix the next step together.",
+  "One check, then one next step.",
+  "I’m proud of you for checking in.",
+  "You can pause and start again.",
+  "Let’s make this moment smaller.",
+  "One tiny step is still a step.",
+  "You are allowed to need help.",
+  "Today does not have to be perfect.",
+  "You are learning every day.",
+  "You are loved in every number.",
+  "We only need the next safe step.",
+  "You can be honest here.",
+  "You are brave for trying."
+];
+
+const FEELING_SUPPORT = {
+  Good: {
+    messages: ["I’m glad you feel good.", "Good is a nice signal.", "I like that you feel good right now."],
+    actions: ["Go to dashboard.", "Before I Eat.", "Check sugar if it is time."]
+  },
+  Okay: {
+    messages: ["Okay is enough.", "Okay counts.", "You do not have to feel amazing to keep going."],
+    actions: ["Go to dashboard.", "Choose the next safe step.", "Check sugar if it is time."]
+  },
+  Tired: {
+    messages: ["Tired is not bad. It means your body needs care.", "It’s okay to feel tired.", "Tired is a signal. Let’s check what you need."],
+    actions: ["Check your sugar.", "Drink some water.", "Ask someone to stay with you.", "Hold your pillow or blanket.", "Choose the easiest next step.", "Tell someone: “I feel tired.”"]
+  },
+  Scared: {
+    messages: ["Scared is not bad. It means your body wants support.", "It’s okay to feel scared. We can make the moment smaller.", "A scared feeling is a signal, not a problem."],
+    actions: ["Name 3 things you can see.", "Hold your favorite thing.", "Put both feet on the floor.", "Look for 3 red things near you.", "Say: “I need help.”", "Stay close to a trusted adult.", "Write the scary thought in Scarlet Entry."]
+  },
+  Sad: {
+    messages: ["Sad is not bad. It means something feels heavy.", "It’s okay to feel sad. You are not doing anything wrong.", "A sad feeling is a signal, not a problem.", "You don’t have to get rid of the sadness right away."],
+    actions: ["Hug your pillow.", "Drink some water.", "Sit next to someone you trust.", "Write one line in Scarlet Entry.", "Wrap yourself in a blanket.", "Hold your favorite thing.", "Draw how the feeling looks.", "Say: “I feel sad and I need company.”", "Listen to one comforting song."]
+  },
+  Angry: {
+    messages: ["Angry is not bad. It means something feels too much, unfair, or frustrating.", "It’s okay to feel angry. We can help it move safely.", "Angry feelings are signals too.", "Angry does not mean you are bad."],
+    actions: ["Hold your pillow tight.", "Scribble hard on paper.", "Count 10 things in the room.", "Stamp your feet 10 times.", "Write the angry words in Scarlet Entry.", "Tear scrap paper.", "Draw the feeling as a shape or color.", "Stay near someone you trust.", "Say: “I’m angry and I need help.”"]
+  },
+  "I don’t know": {
+    messages: ["That’s okay. Sometimes feelings are mixed.", "Not knowing is allowed.", "You do not have to name it perfectly.", "Sometimes the feeling is blurry. We can still help you."],
+    actions: ["Check your sugar.", "Pick the closest feeling.", "Write “I don’t know yet” in Scarlet Entry.", "Choose one body clue: weird / heavy / annoyed / tired.", "Ask for help.", "Pick one small thing to do next."]
+  }
+};
+
+function pickRandomFromPool(pool, key, count=1){
+  const recentKey = `scarletRecent_${key}`;
+  const recent = JSON.parse(sessionStorage.getItem(recentKey) || "[]");
+  const available = pool.filter(x => !recent.includes(x));
+  const source = available.length >= count ? available : pool.slice();
+  const picked = [];
+  while(picked.length < count && source.length){
+    const idx = Math.floor(Math.random() * source.length);
+    picked.push(source.splice(idx,1)[0]);
+  }
+  sessionStorage.setItem(recentKey, JSON.stringify([...picked, ...recent].slice(0, 6)));
+  return count === 1 ? picked[0] : picked;
+}
+
+function renderHowIFeel(selectedMood=null){
+  if(!selectedMood){
+    const nugget = pickRandomFromPool(MOTIVATION_NUGGETS, "motivation", 1);
+    layout(`
+      <div class="card dark">
+        <h2>Hi Amara.</h2>
+        <p class="muted" style="margin-top:8px">${esc(nugget)}</p>
+      </div>
+      <div class="card">
+        <h3>How do you feel right now?</h3>
+        <p class="muted small" style="margin-top:6px">Feelings are not good or bad. They are messages from your heart and body.</p>
+      </div>
+      <div class="grid">
+        ${["Good","Okay","Tired","Scared","Sad","Angry","I don’t know"].map(m => `
+          <button class="action action-feeling" data-mood="${esc(m)}"><strong>${esc(m)}</strong><span>Tell the diary.</span></button>
+        `).join("")}
+      </div>
+    `, "home");
+    document.querySelectorAll("[data-mood]").forEach(btn => btn.onclick = () => renderHowIFeel(btn.dataset.mood));
+    return;
+  }
+
+  const support = FEELING_SUPPORT[selectedMood] || FEELING_SUPPORT["I don’t know"];
+  const message = pickRandomFromPool(support.messages, `msg_${selectedMood}`, 1);
+  const actions = pickRandomFromPool(support.actions, `act_${selectedMood}`, 3);
   layout(`
     <div class="card dark">
-      <h2>Mood Mirror</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Your feelings are signals too.</p>
+      <h2>${esc(selectedMood)}</h2>
+      <p class="muted" style="margin-top:8px">${esc(message)}</p>
     </div>
     <div class="card">
-      <p class="muted">This is not a score. This is a place to notice what your heart has been carrying.</p>
-      <div class="divider-line"></div>
-      <p><strong>You are more than your numbers.</strong></p>
-      <p class="muted small" style="margin-top:8px">If today is hard, write a Scarlet Entry or call your Circle.</p>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn scarlet" id="writeMood">Write a Scarlet Entry</button>
-        <button class="btn secondary" id="callCircle">Call My Circle</button>
+      <h3>Feelings are not good or bad.</h3>
+      <p class="muted">They are messages from your heart and body. Let’s listen, then choose one safe next step.</p>
+    </div>
+    <div class="card">
+      <h3>Choose one for right now:</h3>
+      <div class="grid single" style="margin-top:12px">
+        ${actions.map(a => `<button class="action" data-feel-action="${esc(a)}"><strong>${esc(a)}</strong></button>`).join("")}
       </div>
     </div>
-  `, "diary");
-  document.getElementById("writeMood").onclick = () => { state.view="diary"; render(); };
-  document.getElementById("callCircle").onclick = () => { state.view="circle"; render(); };
+    <div class="grid single">
+      <button class="action scarlet" id="openEntryFromMood"><strong>Open Scarlet Entry</strong><span>Write what you want to say.</span></button>
+      <button class="action" id="helpFromMood"><strong>I need help</strong><span>Go to Mom, Dad, and Tita.</span></button>
+      <button class="action" id="moodGoHome"><strong>Go to dashboard</strong><span>Continue to the app.</span></button>
+    </div>
+  `, "home");
+
+  const finishMood = async (nextView="home", action="") => {
+    state.moodCheckedThisSession = true;
+    sessionStorage.setItem("scarletLastMoodAt", String(Date.now()));
+    try{
+      await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), {
+        mood:selectedMood,
+        supportMessage:message,
+        chosenAction:action || null,
+        createdAt:serverTimestamp(),
+        enteredBy:state.roleKey
+      });
+      if(["Sad","Angry","Scared"].includes(selectedMood)) await unlockBadge("girl-who-stayed");
+    }catch(err){ console.warn("Mood log skipped:", err); }
+    state.view = nextView;
+    render();
+  };
+
+  document.querySelectorAll("[data-feel-action]").forEach(btn => btn.onclick = () => finishMood("home", btn.dataset.feelAction));
+  document.getElementById("openEntryFromMood").onclick = () => finishMood("diary", "Open Scarlet Entry");
+  document.getElementById("helpFromMood").onclick = () => finishMood("circle", "I need help");
+  document.getElementById("moodGoHome").onclick = () => finishMood("home", "Go to dashboard");
+}
+
+function renderMoodMirror(){
+  return renderHowIFeel();
 }
 
 function renderVault(){
@@ -2100,6 +2515,33 @@ function renderDemoResetDone(counts){
   document.getElementById("logoutAfterReset").onclick = () => logout();
 }
 
+async function saveAdultMedicalSettings(){
+  const next = {
+    carbRatio:Number(document.getElementById("setCarbRatio").value || state.settings.carbRatio || 8),
+    targetGlucose:Number(document.getElementById("setTargetGlucose").value || state.settings.targetGlucose || 120),
+    correctionFactor:Number(document.getElementById("setCorrectionFactor").value || state.settings.correctionFactor || 50),
+    insulinStackingHours:Number(document.getElementById("setActiveHours").value || state.settings.insulinStackingHours || 3),
+    doseRounding:Number(document.getElementById("setDoseRounding").value || state.settings.doseRounding || 1),
+    lantusMorningDose:Number(document.getElementById("setLantusMorning").value || state.settings.lantusMorningDose || 20),
+    lantusNightDose:Number(document.getElementById("setLantusNight").value || state.settings.lantusNightDose || 8),
+    highThreshold:Number(document.getElementById("setHighThreshold").value || state.settings.highThreshold || 250),
+    urgentHighThreshold:Number(document.getElementById("setUrgentHigh").value || state.settings.urgentHighThreshold || 300),
+    lowThreshold:Number(document.getElementById("setLowThreshold").value || state.settings.lowThreshold || 70),
+    updatedAt:serverTimestamp(),
+    updatedBy:state.roleKey
+  };
+  await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"), next, { merge:true });
+  state.settings = { ...state.settings, ...next };
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"settingsLogs"), {
+    type:"medical_settings_update",
+    settings:{...next, updatedAt:null},
+    createdAt:serverTimestamp(),
+    enteredBy:state.roleKey
+  });
+  toast("Medical settings saved.");
+  renderAdult();
+}
+
 function renderAdult(){
   const roleKey = localStorage.getItem("scarletRoleKey") || "adult";
   const roleNames = { mom:"Mom", dad:"Dad", tita:"Tita" };
@@ -2144,26 +2586,37 @@ function renderAdult(){
         </button>
         <button class="action plum" id="openVaultAdult">
           <strong>Scarlet Vault</strong>
-          <span>Amara's courage marks</span>
+          <span>Amara's courage marks and badges</span>
         </button>
       </div>
 
       <div class="card">
-        <h3>Amara's Settings</h3>
-        <div class="kv"><span>Rapid insulin</span><strong>${esc(state.settings.rapidInsulin || "Apidra")}</strong></div>
-        <div class="kv"><span>Carb ratio</span><strong>1 unit per ${state.settings.carbRatio}g</strong></div>
-        <div class="kv"><span>Dose rounding</span><strong>Nearest ${state.settings.doseRounding} unit</strong></div>
-        <div class="kv"><span>Low threshold</span><strong>Below ${state.settings.lowThreshold} mg/dL</strong></div>
-        <div class="kv"><span>High alert</span><strong>${state.settings.highThreshold}+ mg/dL</strong></div>
-        <div class="kv"><span>Urgent high</span><strong>${state.settings.urgentHighThreshold}+ mg/dL</strong></div>
-        <div class="kv"><span>Correction above 180</span><strong>+${state.settings.preMealCorrection180} units</strong></div>
-        <div class="kv"><span>Correction above 250</span><strong>+${state.settings.preMealCorrection250} units</strong></div>
-        <p class="small muted" style="margin-top:10px">Settings are locked. Contact the family doctor to update the plan.</p>
+        <h3>Medical Settings</h3>
+        <p class="muted small" style="margin-top:6px">Only change these if Amara’s doctor or care plan changed.</p>
+
+        <div class="field"><label>ICR — Insulin-to-Carbohydrate Ratio</label><input id="setCarbRatio" type="number" inputmode="decimal" value="${esc(state.settings.carbRatio || 8)}" /><p class="small muted">1 unit Apidra covers this many grams of carbs.</p></div>
+        <div class="field"><label>Correction Factor</label><input id="setCorrectionFactor" type="number" inputmode="decimal" value="${esc(state.settings.correctionFactor || 50)}" /><p class="small muted">1 unit Apidra lowers glucose by this many mg/dL.</p></div>
+        <div class="field"><label>Target Glucose</label><input id="setTargetGlucose" type="number" inputmode="numeric" value="${esc(state.settings.targetGlucose || 120)}" /></div>
+        <div class="field"><label>Rapid Insulin Active Time</label><input id="setActiveHours" type="number" inputmode="decimal" value="${esc(state.settings.insulinStackingHours || 3)}" /><p class="small muted">Apidra may still be active during this window.</p></div>
+        <div class="field"><label>Dose Rounding</label><input id="setDoseRounding" type="number" inputmode="decimal" value="${esc(state.settings.doseRounding || 1)}" /></div>
+
+        <div class="divider-line"></div>
+        <h3>Lantus / Long-Acting Insulin</h3>
+        <div class="field"><label>Morning usual Lantus dose</label><input id="setLantusMorning" type="number" inputmode="decimal" value="${esc(state.settings.lantusMorningDose || 20)}" /></div>
+        <div class="field"><label>Night usual Lantus dose</label><input id="setLantusNight" type="number" inputmode="decimal" value="${esc(state.settings.lantusNightDose || 8)}" /></div>
+
+        <div class="divider-line"></div>
+        <h3>Safety Thresholds</h3>
+        <div class="field"><label>Low threshold</label><input id="setLowThreshold" type="number" inputmode="numeric" value="${esc(state.settings.lowThreshold || 70)}" /></div>
+        <div class="field"><label>High threshold</label><input id="setHighThreshold" type="number" inputmode="numeric" value="${esc(state.settings.highThreshold || 250)}" /></div>
+        <div class="field"><label>Urgent high threshold</label><input id="setUrgentHigh" type="number" inputmode="numeric" value="${esc(state.settings.urgentHighThreshold || 300)}" /></div>
+
+        <button class="btn scarlet full" id="saveMedicalSettings">Save Medical Settings</button>
       </div>
 
       <div class="card">
         <h3>Alert Emails</h3>
-        <p class="muted small" style="margin-top:6px;line-height:1.6">Alert records are saved in Firebase. Email delivery activates after deploying Firebase Functions. Update the alert email addresses in Firebase settings.</p>
+        <p class="muted small" style="margin-top:6px;line-height:1.6">Alert records are saved in Firebase. Email delivery activates after deploying Firebase Functions.</p>
       </div>
 
       <div class="card danger">
@@ -2179,6 +2632,11 @@ function renderAdult(){
   if(openReportsBtn) openReportsBtn.onclick = () => renderReports();
   const openVaultAdult = document.getElementById("openVaultAdult");
   if(openVaultAdult) openVaultAdult.onclick = () => renderVault();
+  const saveSettingsBtn = document.getElementById("saveMedicalSettings");
+  if(saveSettingsBtn) saveSettingsBtn.onclick = async () => {
+    const restore = setBusy(saveSettingsBtn, "Saving settings…");
+    try{ await saveAdultMedicalSettings(); } finally{ restore(); }
+  };
 
   const alertsRef = collection(db,"families",FAMILY_ID,"alerts");
   onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
@@ -2225,8 +2683,22 @@ function renderAdult(){
     state.role = savedRoleType;
     await safeEnsureDefaults();
     await loadData();
-    render();
+    state.moodCheckedThisSession = false;
+    if(!maybeStartChildMoodCheck("open")) render();
   } else {
     renderLogin();
   }
 })();
+
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "hidden"){
+    lastHiddenAt = Date.now();
+  }
+  if(document.visibilityState === "visible" && state.authenticated && state.role === "child"){
+    const hiddenLongEnough = lastHiddenAt && (Date.now() - lastHiddenAt > 10 * 60 * 1000);
+    if(hiddenLongEnough){
+      state.moodCheckedThisSession = false;
+      maybeStartChildMoodCheck("resume");
+    }
+  }
+});
