@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID  = "amara";
 const APP_NAME  = "The Scarlet Diaries";
-const BUILD     = "V2.6";
+const BUILD     = "V2.6.2";
 const CIRCLE    = ["Mom", "Dad", "Tita"];
 const DEMO_PIN = "1111";
 const ROLE_AUTH_ACCOUNTS = {
@@ -107,6 +107,7 @@ let state = {
   role:            null,
   selectedRole:    "",
   loginInProgress: false,
+  firebaseOffline:   false,
   pendingRepair:   null,
   settings:        { ...DEFAULT_SETTINGS },
   foods:           STARTER_FOODS,
@@ -240,15 +241,46 @@ async function verifyPinForMode(pin, roleKey){
   return enteredHash === savedHash;
 }
 
+function canUseLocalDemoFallback(pin, roleKey, err){
+  // Demo-only fallback so the app can still open during setup.
+  // This is not Live Mode security and should not be used for real patient data.
+  const msg = String(err?.code || err?.message || "").toLowerCase();
+  return pin === DEMO_PIN && (
+    msg.includes("operation-not-allowed") ||
+    msg.includes("permission") ||
+    msg.includes("invalid-credential") ||
+    msg.includes("user-not-found") ||
+    msg.includes("network") ||
+    msg.includes("auth/")
+  );
+}
+
+async function unlockLocalDemo(roleKey){
+  const role = roleToStoredRole(roleKey);
+  sessionStorage.setItem("scarletJustLoggedIn","yes");
+  state.user = { uid:`local-demo-${roleKey}`, email:`${roleKey}@local.demo` };
+  state.role = role;
+  state.firebaseOffline = true;
+  state.loginInProgress = false;
+  state.appMode = "demo";
+  localStorage.setItem("scarletRole", role);
+  localStorage.setItem("scarletRoleKey", roleKey);
+  try{
+    const localFoods = await fetch("./foods.json").then(r => r.ok ? r.json() : []);
+    if(Array.isArray(localFoods) && localFoods.length) state.foods = localFoods.map(f => ({ active:true, verified:true, ...f }));
+  }catch(e){}
+  render();
+  setTimeout(() => toast("Opened in local demo mode. Firebase is not connected yet."), 200);
+}
+
 // ── LOGIN ────────────────────────────────────────────────────
 function renderLogin(){
   $app.innerHTML = `
     <section class="screen center">
       <div class="app-wrapper">
-        <div class="header">
-          <div class="scarlet-drop"></div>
-          <div class="app-title">The Scarlet <span>Diaries</span></div>
-          <div class="divider"></div>
+        <div class="header brand-header">
+          <img class="brand-logo-main" src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" />
+          <div class="sr-only">The Scarlet Diaries</div>
           <div class="tagline">Every drop. Every breath. Unstoppable.</div>
           <div class="build-tag">${BUILD}</div>
         </div>
@@ -307,10 +339,9 @@ function renderProfileRepair(){
   $app.innerHTML = `
     <section class="screen center">
       <div class="app-wrapper">
-        <div class="header">
-          <div class="scarlet-drop"></div>
-          <div class="app-title">The Scarlet <span>Diaries</span></div>
-          <div class="divider"></div>
+        <div class="header brand-header">
+          <img class="brand-logo-main" src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" />
+          <div class="sr-only">The Scarlet Diaries</div>
           <div class="tagline">Every drop. Every breath. Unstoppable.</div>
           <div class="build-tag">${BUILD}</div>
         </div>
@@ -400,9 +431,14 @@ async function doLogin(create=false){
   }catch(err){
     console.error(err); state.loginInProgress = false;
     try{ await signOut(auth); }catch(e){}
+    if(canUseLocalDemoFallback(pin, roleKey, err)){
+      await unlockLocalDemo(roleKey);
+      return;
+    }
     if(String(err.message||"").includes("Live PINs are not set")) showError(err.message);
+    else if(err.code === "auth/operation-not-allowed") showError("Firebase Email/Password sign-in is not enabled yet. Enable it in Firebase Auth, or use local demo fallback.");
     else if(String(err.message||"").toLowerCase().includes("permission")) showError("Firebase permissions blocked login setup. Please publish the firestore.rules file, then try again.");
-    else showError("Could not unlock yet. Please check Firebase Auth/Firestore setup and try again.");
+    else showError(`Could not unlock yet: ${err.code || err.message || "Firebase setup issue"}`);
   }finally{
     if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
   }
@@ -477,14 +513,14 @@ function layout(content, active="home"){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title">
             <strong>The Scarlet Diaries</strong>
             <p class="small muted">Every drop. Every breath. Unstoppable.</p>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <span class="build-tag">${BUILD}</span>
+          ${state.firebaseOffline ? `<span class="build-tag warning-tag">LOCAL DEMO</span>` : ""}<span class="build-tag">${BUILD}</span>
           <button class="btn secondary" data-action="logout">Exit</button>
         </div>
       </div>
@@ -1555,7 +1591,7 @@ async function renderReportsData(){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title"><strong>Reports</strong><p class="small muted">Adult pattern review</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -1656,6 +1692,14 @@ async function addKetoneLog(glucose, ketoneResult){
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"),{ glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid, alertLevel:ketoneResult==="Moderate / large"?"red":"orange" });
 }
 async function createAlert(type, severity, message){
+  if(state.firebaseOffline){
+    const localAlerts = JSON.parse(localStorage.getItem("scarletLocalAlerts") || "[]");
+    localAlerts.unshift({ type, severity, message, createdAt:new Date().toISOString() });
+    localStorage.setItem("scarletLocalAlerts", JSON.stringify(localAlerts.slice(0,50)));
+    await unlockBadge("signal-flame");
+    if(severity === "red" || severity === "critical") await unlockBadge("three-guardians");
+    return;
+  }
   await addDoc(collection(db,"families",FAMILY_ID,"alerts"),{
     childId:CHILD_ID, type, severity, message,
     recipients:state.settings.alertEmails||[],
@@ -1669,7 +1713,15 @@ async function unlockBadge(id){
   if(state.unlockedBadges.has(id)) return;
   const badge = BADGES.find(b => b.id === id);
   if(!badge) return;
-  await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks",id),{ badgeId:id, name:badge.name, desc:badge.desc, subtitle:badge.subtitle||"", createdAt:serverTimestamp() },{ merge:true });
+  if(!state.firebaseOffline){
+    await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks",id),{ badgeId:id, name:badge.name, desc:badge.desc, subtitle:badge.subtitle||"", createdAt:serverTimestamp() },{ merge:true });
+  }else{
+    const localBadges = JSON.parse(localStorage.getItem("scarletLocalBadges") || "[]");
+    if(!localBadges.includes(id)){
+      localBadges.push(id);
+      localStorage.setItem("scarletLocalBadges", JSON.stringify(localBadges));
+    }
+  }
   state.unlockedBadges.add(id);
   if(!state.badgeUnlockDates[id]) state.badgeUnlockDates[id] = { toDate:()=>new Date() };
   // Check wall-of-proof milestone
@@ -1698,7 +1750,7 @@ function renderDemoReset(){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title"><strong>Reset Demo Data</strong><p class="small muted">Adult-only demo cleanup</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -1771,7 +1823,7 @@ function renderDemoResetDone(counts){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title"><strong>Demo Reset Complete</strong><p class="small muted">The Scarlet Diaries</p></div>
         </div>
         <span class="build-tag">${BUILD}</span>
@@ -1803,7 +1855,7 @@ function renderMedicalSettings(){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title"><strong>Medical Settings</strong><p class="small muted">Adult only</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -1909,7 +1961,7 @@ function renderModeSwitch(){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title"><strong>App Mode</strong><p class="small muted">Adult only</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -1958,7 +2010,7 @@ function renderLivePinSetup(changeOnly=false){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title"><strong>${changeOnly ? "Change Live PINs" : "Go Live"}</strong><p class="small muted">Adult only</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -2264,7 +2316,7 @@ function renderAdultVaultSummary(){
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
-          <div class="logo-small"><span>SD</span></div>
+          <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title"><strong>Scarlet Vault</strong><p class="small muted">Amara's courage marks</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -2307,6 +2359,7 @@ onAuthStateChanged(auth, async user => {
     await loadData();
     render();
   }else{
+    if(state.firebaseOffline && state.user) return;
     if(user) await signOut(auth);
     state.user = null; state.role = null;
     renderLogin();

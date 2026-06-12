@@ -175,3 +175,20 @@ This app is a demo. It is not a medical device. It does not provide medical advi
 - Before switching to Live Mode, an adult must set private PINs for Amara, Mom, Dad, and Tita.
 - Once Live Mode is active, demo PIN `1111` stops working.
 - Adults can change Live PINs or return to Demo Mode from Adult Dashboard → App Mode.
+
+
+## V2.6.1 Login Hotfix
+
+If Firebase Auth or Firestore setup is not ready, demo PIN `1111` now opens the app in **Local Demo Mode** instead of blocking the demo at login.
+
+For full Firebase sync, enable:
+- Firebase Authentication → Sign-in method → Email/Password
+- Publish the included Firestore rules
+
+Local Demo Mode is only for visual/testing access. Live use should connect to Firebase.
+
+
+## V2.6.2 Header Integration
+- Added the Vampire Diaries-inspired Scarlet Diaries header image into the app.
+- Login screen now uses the custom Scarlet Diaries logo header.
+- App top bars now use the new branded header mark instead of the plain SD badge.

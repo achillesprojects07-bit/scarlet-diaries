@@ -561,3 +561,58 @@ p   { color: var(--text-primary); }
   height:18px;
   margin-top:1px;
 }
+
+.warning-tag{
+  border-color:rgba(201,168,76,.45)!important;
+  color:var(--gold)!important;
+}
+
+
+/* V2.6.2 header logo integration */
+.sr-only{
+  position:absolute!important;
+  width:1px;height:1px;
+  padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);
+  white-space:nowrap;border:0;
+}
+.brand-header{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:10px;
+}
+.brand-logo-main{
+  display:block;
+  width:min(92vw, 620px);
+  max-width:100%;
+  height:auto;
+  object-fit:contain;
+  filter:drop-shadow(0 10px 22px rgba(95,0,0,.28));
+}
+.brand-mark{
+  width:132px;
+  height:34px;
+  border-radius:10px;
+  overflow:hidden;
+  background:transparent;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  box-shadow:none;
+  border:none;
+}
+.brand-mark img{
+  display:block;
+  width:120px;
+  height:auto;
+  object-fit:contain;
+}
+.topbar .topbar-title strong{
+  letter-spacing:.02em;
+}
+@media (max-width: 640px){
+  .brand-logo-main{ width:min(94vw, 520px); }
+  .brand-mark{ width:92px; height:26px; }
+  .brand-mark img{ width:86px; }
+}
