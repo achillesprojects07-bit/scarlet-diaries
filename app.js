@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID  = "amara";
 const APP_NAME  = "The Scarlet Diaries";
-const BUILD     = "V2.6.3";
+const BUILD     = "V2.6.4";
 const CIRCLE    = ["Mom", "Dad", "Tita"];
 const DEMO_PIN = "1111";
 const ROLE_AUTH_ACCOUNTS = {
@@ -996,32 +996,17 @@ function todayKey(){
 }
 
 async function hasDoneCheckinToday(){
-  if(state.firebaseOffline){
-    return localStorage.getItem(`scarletDailyCheckin:${todayKey()}`) === "yes";
-  }
-  try{
-    const snap = await getDocs(
-      query(
-        collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"),
-        where("source","==","daily-checkin"),
-        where("dateKey","==",todayKey()),
-        limit(1)
-      )
-    );
-    return !snap.empty;
-  }catch(e){
-    console.warn("Daily check-in check skipped:", e);
-    return true;
-  }
+  // V2.6.4 behavior change:
+  // The opening check-in should appear every fresh app/browser open, even if Amara already answered earlier today.
+  // We still keep dateKey when saving for adult reporting, but we no longer use it to suppress the screen.
+  return false;
 }
 
 async function maybeRenderDailyCheckin(){
   if(state.role !== "child") return false;
   if(state.view !== "home") return false;
   if(state.checkinCheckedToday) return false;
-  const done = await hasDoneCheckinToday();
   state.checkinCheckedToday = true;
-  if(done) return false;
   renderDailyCheckin();
   return true;
 }
@@ -1144,8 +1129,8 @@ function renderDailyCheckinResponse({ moodKey, customText, selectedResponse, sel
           <h1>${esc(selectedResponse)}</h1>
           <p class="checkin-next">${esc(selectedNextStep)}</p>
           <div class="grid single" style="margin-top:18px">
-            <button class="action scarlet" id="checkinWrite"><strong>Write a Scarlet Entry</strong><span>Put the feeling somewhere safe.</span></button>
-            <button class="action" id="checkinHome"><strong>Go home</strong><span>Start the app.</span></button>
+            <button class="action scarlet" id="checkinHome"><strong>I’m ready to begin</strong><span>Carry this gently into the app.</span></button>
+            <button class="action" id="checkinWrite"><strong>Write a Scarlet Entry</strong><span>Put the feeling somewhere safe.</span></button>
           </div>
         </div>
       </div>
@@ -1163,7 +1148,7 @@ function renderDailyCheckinResponse({ moodKey, customText, selectedResponse, sel
     state.view = "diary";
     renderDiary();
   };
-  setTimeout(goHome, 3000);
+  // No auto-advance. Amara chooses when she is ready to continue.
 }
 
 

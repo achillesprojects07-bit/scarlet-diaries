@@ -1,6 +1,6 @@
-# The Scarlet Diaries — V2.6.3
+# The Scarlet Diaries — V2.6.4
 
-**Build name:** Gentle Opening Check-in  
+**Build name:** Gentle Opening Check-in Behavior Fix
 **Base preserved from:** V2.6.2 Include-All Header Build  
 **Tagline:** Every drop. Every breath. Unstoppable.
 
@@ -324,6 +324,25 @@ Always follow the guidance of Amara's doctor and diabetes care team.
 ## Final checks for V2.6.3
 
 - JavaScript syntax check passed.
-- Build string is `V2.6.3`.
+- Build string is `V2.6.4`.
 - V2.6.2 features were preserved.
 - The new daily check-in feature contains no banned breath/breathe/breathing wording.
+
+
+---
+
+## V2.6.4 — Check-in Behavior Fix
+
+This version fixes the daily opening check-in behavior based on testing.
+
+Changed behavior:
+
+- The check-in now appears again after a fresh browser/app reopen.
+- It no longer disappears for the rest of the day after one answer.
+- It still appears only once during the active app session, so Amara is not interrupted every time she returns Home inside the same open session.
+- The response/suggestion screen no longer auto-disappears after 3 seconds.
+- Amara now chooses when to continue by tapping:
+
+`I’m ready to begin`
+
+The **Write a Scarlet Entry** button remains available on the response screen.
