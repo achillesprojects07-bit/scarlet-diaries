@@ -1,6 +1,6 @@
-# The Scarlet Diaries — V2.6.4
+# The Scarlet Diaries — V2.6.5
 
-**Build name:** Gentle Opening Check-in Behavior Fix
+**Build name:** Softer Amara Home + Lantus Shortcut Fix
 **Base preserved from:** V2.6.2 Include-All Header Build  
 **Tagline:** Every drop. Every breath. Unstoppable.
 
@@ -324,7 +324,7 @@ Always follow the guidance of Amara's doctor and diabetes care team.
 ## Final checks for V2.6.3
 
 - JavaScript syntax check passed.
-- Build string is `V2.6.4`.
+- Build string is `V2.6.5`.
 - V2.6.2 features were preserved.
 - The new daily check-in feature contains no banned breath/breathe/breathing wording.
 
@@ -346,3 +346,23 @@ Changed behavior:
 `I’m ready to begin`
 
 The **Write a Scarlet Entry** button remains available on the response screen.
+
+
+---
+
+## V2.6.5 — Softer Amara Home + Lantus Shortcut Fix
+
+This version makes Amara's side gentler and less overwhelming.
+
+Changed:
+
+- Lightened the child-facing background from near-black to a softer plum/burgundy diary palette.
+- Simplified Amara's Home into three sections:
+  - Safety first
+  - How are you feeling?
+  - Diary & courage
+- Reduced the first-screen overwhelm by grouping choices instead of showing one large control-panel grid.
+- Renamed `I Took Insulin` to `I Took Lantus`.
+- The Home shortcut now logs Lantus basal insulin only.
+- Apidra remains inside the meal/correction safety flows, not the Lantus shortcut.
+- Preserved V2.6.4 check-in behavior.

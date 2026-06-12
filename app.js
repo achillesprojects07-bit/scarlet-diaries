@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID  = "amara";
 const APP_NAME  = "The Scarlet Diaries";
-const BUILD     = "V2.6.4";
+const BUILD     = "V2.6.5";
 const CIRCLE    = ["Mom", "Dad", "Tita"];
 const DEMO_PIN = "1111";
 const ROLE_AUTH_ACCOUNTS = {
@@ -1154,30 +1154,45 @@ function renderDailyCheckinResponse({ moodKey, customText, selectedResponse, sel
 
 function renderHome(){
   layout(`
-    <div class="card dark">
-      <p class="pill">Amara's private safety diary</p>
-      <h2 class="hello-title" style="margin-top:12px">Hello, Amara.</h2>
-      <p class="tagline" style="text-align:left;margin-top:4px">What does your body need?</p>
-    </div>
-    <div class="card">
-      <h3>Safety first</h3>
-      <p class="muted small">This app gives an estimate from the saved family plan. It must never be treated as an order to inject. If unsure, call the Circle.</p>
-    </div>
-    <div class="grid">
-      <button class="action scarlet" data-go="meal"><strong>Before I Eat</strong><span>Check sugar, choose food, then see a suggested dose.</span></button>
-      <button class="action" data-go="high"><strong>My Sugar Is High</strong><span>Slow down, check safety, alert the Circle.</span></button>
-      <button class="action" data-go="low"><strong>My Sugar Is Low</strong><span>No insulin now. Protect yourself first.</span></button>
-      <button class="action" data-go="insulin"><strong>I Took Insulin</strong><span>Log Apidra or Lantus.</span></button>
-      <button class="action" data-go="feel"><strong>I Don't Feel Well</strong><span>Tell the diary what your body feels.</span></button>
-      <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Give your feelings a place to go.</span></button>
-      <button class="action plum" data-go="pages"><strong>My Scarlet Pages</strong><span>Reread the words that prove you kept going.</span></button>
-      <button class="action plum" data-go="vault"><strong>Open The Scarlet Vault</strong><span>Proof that you kept going.</span></button>
-      <button class="action" data-go="mood"><strong>Mood Mirror</strong><span>See feelings without shame.</span></button>
-      <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
+    <div class="amara-home">
+      <section class="home-hero soft-card">
+        <p class="pill">Amara's private safety diary</p>
+        <h2 class="hello-title">Hello, Amara.</h2>
+        <p class="tagline">What do you need right now?</p>
+      </section>
+
+      <section class="home-section">
+        <h3>Safety first</h3>
+        <p class="muted small">Choose the one thing that matches what is happening now.</p>
+        <div class="home-grid primary-actions">
+          <button class="action big scarlet" data-go="meal"><strong>Before I Eat</strong><span>Food, sugar, and Apidra estimate.</span></button>
+          <button class="action big low-action" data-go="low"><strong>My Sugar Is Low</strong><span>No insulin now. Protect yourself first.</span></button>
+          <button class="action big high-action" data-go="high"><strong>My Sugar Is High</strong><span>Check safety and alert the Circle.</span></button>
+          <button class="action big lantus-action" data-go="insulin"><strong>I Took Lantus</strong><span>Log basal insulin only.</span></button>
+        </div>
+      </section>
+
+      <section class="home-section feeling-section">
+        <h3>How are you feeling?</h3>
+        <p class="muted small">Feelings are signals. They are allowed here.</p>
+        <div class="home-grid">
+          <button class="action plum" data-go="mood"><strong>Mood Mirror</strong><span>See feelings without shame.</span></button>
+          <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Put the feeling somewhere safe.</span></button>
+        </div>
+      </section>
+
+      <section class="home-section quiet-section">
+        <h3>Diary & courage</h3>
+        <div class="home-grid">
+          <button class="action" data-go="pages"><strong>My Scarlet Pages</strong><span>Read what you wrote.</span></button>
+          <button class="action" data-go="vault"><strong>Scarlet Vault</strong><span>Proof that you kept going.</span></button>
+          <button class="action circle-action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
+          <button class="action" data-go="feel"><strong>I Don’t Feel Well</strong><span>Tell the diary what your body feels.</span></button>
+        </div>
+      </section>
     </div>`, "home");
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { state.view = b.dataset.go; render(); });
 }
-
 // ── MEAL FLOW ────────────────────────────────────────────────
 function renderMealStart(){
   state.meal = { type:null, glucose:null, items:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" };
@@ -1934,24 +1949,28 @@ async function saveLowFlow(recheck){
 function renderInsulinLog(){
   layout(`
     <div class="card">
-      <h2>I Took Insulin</h2>
-      <p class="muted">Log what happened. Honesty protects you.</p>
-      <div class="field"><label>Insulin</label><select id="insulinType"><option>Apidra</option><option>Lantus</option></select></div>
-      <div class="field"><label>Dose units</label><input id="dose" type="number" inputmode="decimal" placeholder="Example: 6" /></div>
-      <div class="field"><label>Reason</label><select id="reason"><option>Meal</option><option>Correction</option><option>Basal</option><option>I am not sure</option></select></div>
-      <button class="btn scarlet full" id="saveInsulin">Save insulin log</button>
+      <h2>I Took Lantus</h2>
+      <p class="muted">Log basal insulin. Apidra stays inside the meal or correction safety flows.</p>
+      <div class="card soft-note" style="margin:12px 0 0">
+        <p class="small muted"><strong>Insulin:</strong> Lantus · Basal insulin</p>
+      </div>
+      <div class="field"><label>Lantus dose units</label><input id="dose" type="number" inputmode="decimal" placeholder="Example: 8" /></div>
+      <button class="btn scarlet full" id="saveInsulin">Save Lantus log</button>
     </div>`, "home");
   document.getElementById("saveInsulin").onclick = async () => {
     const btn     = document.getElementById("saveInsulin");
-    const restore = setBusy(btn, "Saving insulin log…");
-    const type    = document.getElementById("insulinType").value;
+    const restore = setBusy(btn, "Saving Lantus log…");
     const dose    = Number(document.getElementById("dose").value);
-    const reason  = document.getElementById("reason").value;
-    if(!dose || dose <= 0){ restore(); return toast("Please enter dose."); }
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"),{ insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.user.uid });
-    if(type === "Apidra" && reason === "Correction") await createAlert("correction_logged","orange",`Amara logged correction insulin: ${dose} units Apidra.`);
-    restore(); toast("Insulin log saved.");
-    renderFlowDone({ title:"Insulin log saved", message:"The insulin dose was saved in Amara's record.", next:[{ view:"diary", title:"Write a Scarlet Entry", sub:"Say how today felt." }] });
+    if(!dose || dose <= 0){ restore(); return toast("Please enter the Lantus dose."); }
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"),{
+      insulinType:"Lantus",
+      dose,
+      reason:"Basal",
+      createdAt:serverTimestamp(),
+      enteredBy:state.user.uid
+    });
+    restore(); toast("Lantus log saved.");
+    renderFlowDone({ title:"Lantus log saved", message:"The basal insulin dose was saved in Amara's record.", next:[{ view:"diary", title:"Write a Scarlet Entry", sub:"Say how today felt." }] });
   };
 }
 
