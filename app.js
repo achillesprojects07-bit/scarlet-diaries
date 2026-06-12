@@ -17,8 +17,17 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID  = "amara";
 const APP_NAME  = "The Scarlet Diaries";
-const BUILD     = "V2.5";
+const BUILD     = "V2.6";
 const CIRCLE    = ["Mom", "Dad", "Tita"];
+const DEMO_PIN = "1111";
+const ROLE_AUTH_ACCOUNTS = {
+  amara:{ email:"amara.demo@scarlet-diaries.app", password:"ScarletDemo1111!", displayName:"Amara" },
+  mom:  { email:"mom.demo@scarlet-diaries.app",   password:"ScarletDemo1111!", displayName:"Mom" },
+  dad:  { email:"dad.demo@scarlet-diaries.app",   password:"ScarletDemo1111!", displayName:"Dad" },
+  tita: { email:"tita.demo@scarlet-diaries.app",  password:"ScarletDemo1111!", displayName:"Tita" }
+};
+const ROLE_LABELS = { amara:"Amara", mom:"Mom", dad:"Dad", tita:"Tita" };
+
 
 // ── DEFAULT SETTINGS ─────────────────────────────────────────
 const DEFAULT_SETTINGS = {
@@ -166,6 +175,71 @@ function render(){
   }
 }
 
+
+// ── PIN + FIREBASE ROLE LOGIN HELPERS ───────────────────────
+async function sha256(text){
+  const bytes = new TextEncoder().encode(String(text));
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+async function getAppModeDoc(){
+  try{
+    const snap = await getDoc(doc(db,"families",FAMILY_ID,"settings","appMode"));
+    if(snap.exists()) return { mode:"demo", livePinsSet:false, pinHashes:{}, ...snap.data() };
+  }catch(err){ console.warn("Could not read app mode yet:", err); }
+  return { mode:"demo", livePinsSet:false, pinHashes:{} };
+}
+
+async function signIntoRoleFirebaseAccount(roleKey){
+  const acct = ROLE_AUTH_ACCOUNTS[roleKey] || ROLE_AUTH_ACCOUNTS.amara;
+  try{
+    return await signInWithEmailAndPassword(auth, acct.email, acct.password);
+  }catch(err){
+    if(err.code === "auth/user-not-found" || err.code === "auth/invalid-credential"){
+      try{
+        return await createUserWithEmailAndPassword(auth, acct.email, acct.password);
+      }catch(createErr){
+        if(createErr.code === "auth/email-already-in-use"){
+          return await signInWithEmailAndPassword(auth, acct.email, acct.password);
+        }
+        throw createErr;
+      }
+    }
+    throw err;
+  }
+}
+
+async function ensureRoleProfile(user, roleKey){
+  const role = roleToStoredRole(roleKey);
+  const acct = ROLE_AUTH_ACCOUNTS[roleKey] || ROLE_AUTH_ACCOUNTS.amara;
+  await setDoc(doc(db,"users",user.uid),{
+    email:acct.email,
+    role,
+    roleKey,
+    familyId:FAMILY_ID,
+    displayName:acct.displayName,
+    active:true,
+    demoRoleAccount:true,
+    updatedAt:serverTimestamp()
+  },{ merge:true });
+  return { role, roleKey };
+}
+
+async function verifyPinForMode(pin, roleKey){
+  const modeDoc = await getAppModeDoc();
+  state.appMode = modeDoc.mode || "demo";
+  if((modeDoc.mode || "demo") === "demo"){
+    return pin === DEMO_PIN;
+  }
+  const savedHash = modeDoc.pinHashes?.[roleKey];
+  if(!modeDoc.livePinsSet || !savedHash){
+    throw new Error("Live PINs are not set. Ask an adult to return to Demo Mode or set live PINs.");
+  }
+  const enteredHash = await sha256(pin);
+  return enteredHash === savedHash;
+}
+
 // ── LOGIN ────────────────────────────────────────────────────
 function renderLogin(){
   $app.innerHTML = `
@@ -187,19 +261,18 @@ function renderLogin(){
               <button class="role-btn circle" data-role="dad"><span class="role-icon">⚡</span> I am Dad</button>
               <button class="role-btn circle" data-role="tita"><span class="role-icon">🔮</span> I am Tita</button>
             </div>
+            <p class="small muted" style="text-align:center;margin-top:14px">Demo PIN for everyone: 1111</p>
           </div>
           <div class="auth-form" id="authForm">
-            <div class="form-title" id="formTitle">Enter Your Details</div>
+            <div class="form-title" id="formTitle">Enter PIN</div>
             <div class="error-msg" id="errorMsg"></div>
-            <input type="email" class="form-input" id="emailInput" placeholder="Email address" autocomplete="email" />
-            <input type="password" class="form-input" id="passwordInput" placeholder="Password" autocomplete="current-password" />
+            <input type="password" class="form-input pin-input" id="pinInput" placeholder="4-digit PIN" inputmode="numeric" autocomplete="one-time-code" maxlength="8" />
             <button class="submit-btn" id="loginBtn"><span>🗝</span> Unlock the Diary</button>
-            <button class="back-btn" id="backBtn">← Choose a different role</button>
-            <button class="create-small" id="createBtn">Create account</button>
-            <p class="small muted" style="text-align:center;margin-top:2px">Already created? Use Unlock the Diary above.</p>
+            <button class="back-btn" id="backBtn">← Choose a different profile</button>
+            <p class="small muted" style="text-align:center;margin-top:8px">For demo: everyone uses 1111. Live Mode uses private PINs per profile.</p>
           </div>
         </div>
-        <div class="footer">The Scarlet Diaries · Private &amp; Protected</div>
+        <div class="footer">The Scarlet Diaries · PIN Demo Login</div>
       </div>
     </section>`;
 
@@ -207,7 +280,9 @@ function renderLogin(){
     state.selectedRole = btn.dataset.role;
     document.getElementById("roleSelection").style.display = "none";
     document.getElementById("authForm").classList.add("visible");
-    document.getElementById("formTitle").textContent = roleTitle(state.selectedRole);
+    document.getElementById("formTitle").textContent = `${roleTitle(state.selectedRole)} PIN`;
+    document.getElementById("pinInput").value = "";
+    setTimeout(() => document.getElementById("pinInput")?.focus(), 80);
     hideError();
   });
   document.getElementById("backBtn").onclick = () => {
@@ -217,8 +292,7 @@ function renderLogin(){
     hideError();
   };
   document.getElementById("loginBtn").onclick = () => doLogin(false);
-  document.getElementById("createBtn").onclick = () => doLogin(true);
-  document.getElementById("passwordInput").onkeydown = e => { if(e.key === "Enter") doLogin(false); };
+  document.getElementById("pinInput").onkeydown = e => { if(e.key === "Enter") doLogin(false); };
 }
 function showError(msg){ const el = document.getElementById("errorMsg"); if(!el) return toast(msg); el.textContent = msg; el.classList.add("visible"); }
 function hideError(){ const el = document.getElementById("errorMsg"); if(el) el.classList.remove("visible"); }
@@ -287,49 +361,34 @@ function renderProfileRepair(){
 
 // ── DO LOGIN ─────────────────────────────────────────────────
 async function doLogin(create=false){
-  const email   = document.getElementById("emailInput").value.trim();
-  const pass    = document.getElementById("passwordInput").value;
+  const pin     = document.getElementById("pinInput")?.value.trim() || "";
   const roleKey = state.selectedRole || "amara";
   const role    = roleToStoredRole(roleKey);
-  if(!email || !pass) return showError("Please enter your email and password.");
 
-  const btn = create ? document.getElementById("createBtn") : document.getElementById("loginBtn");
+  if(!/^\d{4,8}$/.test(pin)) return showError("Please enter your PIN.");
+
+  const btn = document.getElementById("loginBtn");
   const originalText = btn ? btn.innerHTML : "";
   try{
     state.loginInProgress = true;
-    if(btn){ btn.disabled = true; btn.innerHTML = create ? "Creating account…" : "Unlocking…"; }
+    if(btn){ btn.disabled = true; btn.innerHTML = "Unlocking…"; }
     hideError();
-    const cred = create
-      ? await createUserWithEmailAndPassword(auth, email, pass)
-      : await signInWithEmailAndPassword(auth, email, pass);
 
-    const userRef  = doc(db,"users",cred.user.uid);
-    let userSnap   = await getDoc(userRef);
+    const cred = await signIntoRoleFirebaseAccount(roleKey);
+    await ensureRoleProfile(cred.user, roleKey);
 
-    if(create){
-      await setDoc(userRef,{
-        email, role, roleKey, familyId:FAMILY_ID,
-        displayName: role === "child" ? "Amara" : roleKey,
-        active:true, createdAt:serverTimestamp(), updatedAt:serverTimestamp()
-      },{ merge:true });
-      userSnap = await getDoc(userRef);
-      toast("Account created. Unlocking diary…");
+    const ok = await verifyPinForMode(pin, roleKey);
+    if(!ok){
+      await signOut(auth);
+      state.loginInProgress = false;
+      return showError(state.appMode === "live" ? "Incorrect live PIN for this profile." : "Incorrect demo PIN. Use 1111 for the demo.");
     }
 
-    if(!userSnap.exists()){
-      state.pendingRepair = { user:cred.user, email, role, roleKey };
-      if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
-      renderProfileRepair(); return;
-    }
-
-    const profile = userSnap.data();
-    if(profile.roleKey !== roleKey || profile.role !== role){
-      await signOut(auth); state.loginInProgress = false;
-      return showError("This account is not assigned to this profile. Please choose the correct profile.");
-    }
+    const userSnap = await getDoc(doc(db,"users",cred.user.uid));
+    const profile = userSnap.exists() ? userSnap.data() : {};
     if(profile.active === false){
       await signOut(auth); state.loginInProgress = false;
-      return showError("This account is not active. Please ask an adult to check it.");
+      return showError("This profile is not active. Please ask an adult to check it.");
     }
 
     sessionStorage.setItem("scarletJustLoggedIn","yes");
@@ -340,14 +399,12 @@ async function doLogin(create=false){
 
   }catch(err){
     console.error(err); state.loginInProgress = false;
-    if(err.code === "auth/invalid-email")                showError("Please enter a valid email address.");
-    else if(err.code === "auth/email-already-in-use")    showError("This email already has an account. Use Unlock the Diary instead.");
-    else if(err.code === "auth/weak-password")           showError("Please use a stronger password.");
-    else if(err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") showError("Incorrect email or password. Try again.");
-    else if(String(err.message||"").toLowerCase().includes("permission")) showError("Firebase permissions blocked setup. Please publish the firestore.rules file, then try again.");
-    else showError(err.message || "Something went wrong. Please try again.");
+    try{ await signOut(auth); }catch(e){}
+    if(String(err.message||"").includes("Live PINs are not set")) showError(err.message);
+    else if(String(err.message||"").toLowerCase().includes("permission")) showError("Firebase permissions blocked login setup. Please publish the firestore.rules file, then try again.");
+    else showError("Could not unlock yet. Please check Firebase Auth/Firestore setup and try again.");
   }finally{
-    if(!state.pendingRepair && btn){ btn.disabled = false; btn.innerHTML = originalText; }
+    if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
   }
 }
 
@@ -1867,16 +1924,17 @@ function renderModeSwitch(){
         </div>
         ${isDemo ? `
           <div class="card" style="background:rgba(201,168,76,.06);border-color:rgba(201,168,76,.25);margin:0 0 10px">
-            <p class="small" style="color:var(--gold)">This is Demo Mode. Use this for testing the app only. Demo data and test logs can be reset at any time.</p>
+            <p class="small" style="color:var(--gold)">This is Demo Mode. Everyone can use PIN 1111 for testing.</p>
           </div>
           <div class="mode-btns">
-            <button class="btn red" id="goLiveBtn">Go Live</button>
+            <button class="btn red" id="goLiveBtn">Go Live / Set Private PINs</button>
             <button class="btn secondary" id="resetDemoFromMode">Reset Demo Data</button>
           </div>` : `
           <div class="card" style="background:var(--green-soft);border-color:rgba(39,174,96,.25);margin:0 0 10px">
-            <p class="small" style="color:var(--green)">Live Mode is active. This is no longer a test environment. Handle all data with care.</p>
+            <p class="small" style="color:var(--green)">Live Mode is active. Demo PIN 1111 no longer works. Each profile uses its private PIN.</p>
           </div>
           <div class="mode-btns">
+            <button class="btn secondary" id="changeLivePinsBtn">Change Live PINs</button>
             <button class="btn secondary" id="returnToDemoBtn">Return to Demo Mode</button>
           </div>`}
       </div>
@@ -1884,17 +1942,78 @@ function renderModeSwitch(){
   bindGlobal();
   document.getElementById("backFromMode").onclick = () => renderAdult();
   if(isDemo){
-    document.getElementById("goLiveBtn").onclick = () => {
-      if(!confirm("Go Live? This should only be used when you are ready to stop using demo/test data. Live Mode should be used carefully. Continue?")) return;
-      saveAppMode("live").then(() => { toast("App is now in Live Mode."); renderAdult(); });
-    };
+    document.getElementById("goLiveBtn").onclick = () => renderLivePinSetup();
     document.getElementById("resetDemoFromMode").onclick = () => renderDemoReset();
   }else{
+    document.getElementById("changeLivePinsBtn").onclick = () => renderLivePinSetup(true);
     document.getElementById("returnToDemoBtn").onclick = () => {
-      if(!confirm("Return to Demo Mode? This will allow testing tools again. Continue?")) return;
+      if(!confirm("Return to Demo Mode? Demo PIN 1111 will work again. Continue?")) return;
       saveAppMode("demo").then(() => { toast("App returned to Demo Mode."); renderAdult(); });
     };
   }
+}
+
+function renderLivePinSetup(changeOnly=false){
+  $app.innerHTML = `
+    <div class="screen">
+      <div class="topbar">
+        <div class="logo-lockup">
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title"><strong>${changeOnly ? "Change Live PINs" : "Go Live"}</strong><p class="small muted">Adult only</p></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="build-tag">${BUILD}</span>
+          <button class="btn secondary" id="cancelLivePins">Cancel</button>
+        </div>
+      </div>
+      <div class="card danger">
+        <h2>${changeOnly ? "Set new private PINs" : "Set private PINs before going live"}</h2>
+        <p class="muted" style="margin-top:8px">Demo PIN 1111 will stop working in Live Mode. Set a private PIN for each profile.</p>
+      </div>
+      <div class="card">
+        <div class="field"><label>Amara PIN</label><input class="form-input" id="pinAmara" type="password" inputmode="numeric" maxlength="8" placeholder="4 to 8 digits" /></div>
+        <div class="field"><label>Mom PIN</label><input class="form-input" id="pinMom" type="password" inputmode="numeric" maxlength="8" placeholder="4 to 8 digits" /></div>
+        <div class="field"><label>Dad PIN</label><input class="form-input" id="pinDad" type="password" inputmode="numeric" maxlength="8" placeholder="4 to 8 digits" /></div>
+        <div class="field"><label>Tita PIN</label><input class="form-input" id="pinTita" type="password" inputmode="numeric" maxlength="8" placeholder="4 to 8 digits" /></div>
+        <label class="check-row" style="margin-top:10px">
+          <input type="checkbox" id="confirmLivePins" />
+          <span>I understand these PINs replace demo PIN 1111 in Live Mode.</span>
+        </label>
+        <button class="btn red full" style="margin-top:14px" id="saveLivePinsBtn">${changeOnly ? "Save Live PINs" : "Save PINs and Go Live"}</button>
+      </div>
+    </div>`;
+  bindGlobal();
+  document.getElementById("cancelLivePins").onclick = () => renderModeSwitch();
+  document.getElementById("saveLivePinsBtn").onclick = async () => {
+    const pins = {
+      amara:document.getElementById("pinAmara").value.trim(),
+      mom:document.getElementById("pinMom").value.trim(),
+      dad:document.getElementById("pinDad").value.trim(),
+      tita:document.getElementById("pinTita").value.trim()
+    };
+    if(!Object.values(pins).every(p => /^\d{4,8}$/.test(p))) return toast("Each PIN must be 4 to 8 digits.");
+    if(Object.values(pins).some(p => p === DEMO_PIN)) return toast("Do not use 1111 for Live Mode.");
+    if(!document.getElementById("confirmLivePins").checked) return toast("Please confirm that demo PIN 1111 will be replaced.");
+
+    const btn = document.getElementById("saveLivePinsBtn");
+    const restore = setBusy(btn, changeOnly ? "Saving PINs…" : "Going live…");
+    try{
+      const pinHashes = {};
+      for(const [roleKey,pin] of Object.entries(pins)) pinHashes[roleKey] = await sha256(pin);
+      await setDoc(doc(db,"families",FAMILY_ID,"settings","appMode"),{
+        mode:"live",
+        livePinsSet:true,
+        pinHashes,
+        updatedAt:serverTimestamp()
+      },{ merge:true });
+      state.appMode = "live";
+      toast(changeOnly ? "Live PINs updated." : "Live Mode is now active.");
+      renderAdult();
+    }catch(err){
+      console.error(err);
+      toast(String(err.message||"").toLowerCase().includes("permission") ? "Could not save PINs. Check Firestore rules." : "Could not save Live PINs.");
+    }finally{ restore(); }
+  };
 }
 
 // ── ADULT DASHBOARD ───────────────────────────────────────────

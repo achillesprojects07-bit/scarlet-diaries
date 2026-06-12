@@ -539,3 +539,25 @@ p   { color: var(--text-primary); }
 .empty-state p { font-size: 14px; line-height: 1.6; }
 
 /* profile repair reuse */
+
+
+/* V2.6 PIN + Live PIN setup */
+.pin-input{
+  text-align:center;
+  letter-spacing:8px;
+  font-size:22px;
+  font-weight:900;
+}
+.check-row{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.4;
+}
+.check-row input{
+  width:18px;
+  height:18px;
+  margin-top:1px;
+}

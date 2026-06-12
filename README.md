@@ -165,3 +165,13 @@ This app is a demo. It is not a medical device. It does not provide medical advi
 ---
 
 *The Scarlet Diaries V2.5 · Every drop. Every breath. Unstoppable.*
+
+
+## V2.6 PIN Login + Live PIN Setup Hotfix
+
+- Replaced visible email/password login with profile + PIN login.
+- Demo Mode uses PIN `1111` for Amara, Mom, Dad, and Tita.
+- The app still signs into a separate Firebase Auth account for each role behind the scenes so Firestore logs, alerts, reports, and dashboards keep working.
+- Before switching to Live Mode, an adult must set private PINs for Amara, Mom, Dad, and Tita.
+- Once Live Mode is active, demo PIN `1111` stops working.
+- Adults can change Live PINs or return to Demo Mode from Adult Dashboard → App Mode.
