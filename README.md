@@ -1,99 +1,221 @@
-# The Scarlet Diaries — V2.5
+# The Scarlet Diaries — V2.6.3
 
-**Motivation + Parent Dashboard + Medical Settings + Demo/Live Mode**
-
-> Every drop. Every breath. Unstoppable.
+**Build name:** Gentle Opening Check-in  
+**Base preserved from:** V2.6.2 Include-All Header Build  
+**Tagline:** Every drop. Every breath. Unstoppable.
 
 ---
 
 ## What is this
 
-The Scarlet Diaries is a Type 1 Diabetes support PWA built for a 9-year-old named Amara. It is not a medical device. All insulin numbers are suggested estimates only and require adult confirmation before injection.
+The Scarlet Diaries is a Type 1 Diabetes support PWA built for a 9-year-old named Amara.
 
-**Tech stack:** Static PWA · Firebase Auth · Firestore · GitHub Pages (or any static host)
+It is **not a medical device**. All insulin numbers are suggested estimates only and require adult confirmation before injection.
+
+**Tech stack:** Static PWA · Firebase Auth · Firestore · GitHub Pages or any static host
 
 ---
 
-## V2.5 Changelog
+## V2.6.3 Changelog
 
-### New — Editable Medical Settings (adults only)
-- ICR (insulin to carb ratio) is now editable by Mom, Dad, and Tita
-- Low/high/urgent-high thresholds are editable
-- Insulin stacking window is editable
-- Correction rules are editable
-- Amara cannot see or edit medical settings
-- Settings save to Firestore and immediately update all calculation flows
-- Warning copy: "Change these only if Amara's doctor or diabetes care team updates the plan"
-- Fixed default high threshold from 250 to 180 (correct clinical default)
+### New — Gentle Opening Check-in
 
-### New — Demo Mode / Live Mode switch (adults only)
-- App mode saved to Firestore under `families/scarlet-family/settings/appMode`
-- Mode pill visible in adult dashboard header (Demo / Live)
-- Go Live confirmation dialog
-- Return to Demo Mode confirmation dialog
-- Reset Demo Data only available in Demo Mode
-- Amara cannot see or change app mode
+V2.6.3 adds a soft once-per-day opening check-in for **Amara only**.
 
-### New — Redesigned Adult Dashboard
-- Top header: role name + mode pill + Exit button
-- Section 1: Today's Safety Snapshot — live status card (Calm / Needs Review / Urgent) with color coding
-- Section 2: Needs Adult Attention — live alerts list with severity pills and "I saw this" acknowledge buttons
-- Section 3: Quick Actions — 4 buttons: Open Reports · Medical Settings · Scarlet Vault · App Mode
-- Section 4: Recent Care Timeline — chronological timeline of glucose, meal, insulin, diary, and alert events
-- Section 5: Amara's Courage — badge count, diary count, help requests, safety steps, latest badge earned
-- Section 6: Pattern Review — total log counts, low/high event counts, button to Open Full Reports
-- Section 7: Demo Tools — reset button only visible in Demo Mode, placed at the bottom
-- No child-style emotional elements in adult view
-- No duplicate Reports buttons
-- No demo tools at the top
+After Amara logs in, before she reaches the home screen, the app checks whether she has already completed today's check-in.
 
-### Rebuilt — The Scarlet Vault
-- Summary header: "X proofs of courage" + poetic tagline
-- 5 organized sections: Safety · Food Confidence · Scarlet Pages · Streaks · Courage
-- Each badge shows: name · poetic subtitle · full desc · when it wakes (if locked) · date unlocked (if available)
-- Unlocked badges glow with scarlet border and icon
-- Locked badges are dim but readable — not discouraging
-- 27 badges total, each with unique subtitle and meaning
-- Adult can view vault summary from Quick Actions
+- If she has not checked in today, the check-in appears.
+- If she has already checked in today, the app goes straight to Home.
+- Adult users skip this check-in completely.
 
-### Rebuilt — Reports
-- Clear empty state: "No report data yet. Use the app for a few logs, then come back."
-- Firestore permission error shows clear message
-- 7-day and 14-day sections with per-type counts
-- Reports do NOT appear after meal save, insulin save, low save, or high save
-- Adult dashboard has one clear "Open Reports" button in Quick Actions and one in Pattern Review
-- Reports Back button always works
+The check-in includes:
 
-### Preserved from V2.4 — all working features kept
-- Firebase Auth, Firestore, role validation, profile repair
-- 300-food foods.json (loads locally — no Firestore seeding needed)
-- Breakfast Favorites, Meal Favorites, All category
-- Food search by first letter and word
-- Measurable portions
-- Before I Eat full flow: glucose → food → Meal So Far → hidden carbs → Suggested Apidra card → Adult Confirmed → auto-save meal and insulin log
-- High sugar flow: ketones → symptoms → recent Apidra → stacking warning → no correction if recent Apidra → Adult Confirmed
-- Low sugar guided flow: fast sugar → adult alert → recheck → save (no dropdowns)
-- Call My Circle, alerts, acknowledgement
-- Scarlet Entry, My Scarlet Pages
-- Demo Reset (type RESET to confirm)
-- All button feedback (Saving… / Saved, Adding… / Added ✓, Sending alert…)
+- rotating opening questions
+- mood choices
+- mood-matched encouragement
+- rotating gentle next-step suggestions
+- optional custom feeling text
+- automatic return to Home after the response screen
+- buttons for **Write a Scarlet Entry** and **Go home**
+
+Mood choices:
+
+- Brave
+- Okay
+- Tired
+- Sad
+- Angry
+- Something only I can name
+
+### Important emotional language rule
+
+The new check-in feature intentionally does **not** use these words or phrases:
+
+- breathe
+- breath
+- breathing
+- take a breath
+- deep breath
+
+The check-in copy also avoids telling Amara to calm down, hurry past the feeling, or fix the feeling.
+
+The emotional principle is:
+
+**Feelings are signals. They are valid exactly as they are.**
+
+---
+
+## Check-in data behavior
+
+When the daily check-in is completed, it saves to:
+
+`families/{familyId}/children/{childId}/moodLogs`
+
+with:
+
+- `source: "daily-checkin"`
+- selected mood
+- optional custom mood text
+- `dateKey`
+- question shown
+- response shown
+- next step shown
+- created timestamp
+- enteredBy user id
+
+If custom text is entered, it also saves a Scarlet Entry with:
+
+- `source: "daily-checkin"`
+
+If Firebase is unavailable and the app is in Local Demo Mode, the check-in uses local storage so the demo can still continue.
+
+---
+
+## Badge behavior added in V2.6.3
+
+The daily check-in can unlock:
+
+- `steady-spark` — every completed check-in
+- `girl-who-stayed` — sad, angry, or tired
+- `soft-monster-tamer` — sad or angry
+- `moonlit-heart` — sad
+- `brave-page` — custom feeling text saved
+- `truth-teller` — sad, angry, or tired
+
+---
+
+## Adult Dashboard update
+
+The **Amara's Courage** section now includes:
+
+- total daily check-ins
+- latest check-in mood
+- latest check-in date
+
+---
+
+## Preserved from V2.6.2
+
+This build preserves the V2.6.2 base and does not rebuild the app from scratch.
+
+Preserved features include:
+
+- PIN login
+- demo PIN `1111`
+- Firebase role login behind the scenes
+- Local Demo Mode fallback if Firebase blocks login
+- Demo Mode / Live Mode
+- private Live PIN setup before Go Live
+- Reset Demo Data
+- custom Scarlet Diaries vampire-inspired header image
+- branded app top bars
+- 300-food local database
+- Breakfast Favorites
+- Meal Favorites
+- All food category
+- food search by first letter or word
+- measurable food portions
+- Before I Eat full flow
+- big Suggested Apidra card
+- Adult Confirmed meal and insulin save
+- High Sugar guided flow
+- Low Sugar guided flow
+- recent Apidra / insulin stacking protection
+- Reports
+- Adult Dashboard
+- Adult-only Medical Settings
+- editable ICR by adult only
+- Scarlet Entry
+- My Scarlet Pages
+- Scarlet Vault
+- badges
+- Call My Circle
+- alerts and acknowledgement
+
+---
+
+## Previous build history
+
+### V2.5 — Motivation + Parent Dashboard + Medical Settings + Demo/Live Mode
+
+Major features:
+
+- editable Medical Settings for adults only
+- ICR editable by Mom, Dad, and Tita
+- low, high, and urgent-high thresholds editable
+- insulin stacking window editable
+- correction rules editable
+- Demo Mode / Live Mode switch
+- redesigned Adult Dashboard
+- rebuilt Scarlet Vault
+- rebuilt Reports
+- preserved V2.4 food and safety flows
+
+### V2.6 — PIN Login + Live PIN Setup
+
+- replaced visible email/password login with profile + PIN login
+- demo PIN `1111` for Amara, Mom, Dad, and Tita
+- Firebase Auth still used behind the scenes
+- adult must set private PINs before Go Live
+- demo PIN stops working once Live Mode is active
+
+### V2.6.1 — Login Hotfix
+
+- if Firebase Auth or Firestore setup is not ready, demo PIN `1111` opens the app in Local Demo Mode instead of blocking login
+- Local Demo Mode is for visual/testing access only
+
+### V2.6.2 — Header Integration
+
+- added the Vampire Diaries-inspired Scarlet Diaries header image
+- login screen uses the custom Scarlet Diaries logo header
+- app top bars use the branded header mark instead of plain SD badge
+
+### V2.6.3 — Gentle Opening Check-in
+
+- added once-per-day child-only emotional check-in
+- added rotating question, response, and next-step arrays
+- saved check-ins to mood logs
+- connected emotional check-in to badges
+- updated Adult Dashboard courage summary
 
 ---
 
 ## File structure
 
-```
+```text
 /
-├── index.html            ← Entry point
-├── app.js                ← All app logic (V2.5)
-├── styles.css            ← All styles (V2.5)
-├── foods.json            ← 300-food local database
-├── firebase-config.js    ← YOUR Firebase config (fill in your values)
-├── firestore.rules       ← Firestore security rules
-├── firebase.json         ← Firebase project config
-├── manifest.webmanifest  ← PWA manifest
-├── icons/                ← App icons
-└── functions/            ← Firebase Functions (email alerts, future use)
+├── index.html
+├── app.js
+├── styles.css
+├── foods.json
+├── firebase-config.js
+├── firestore.rules
+├── firebase.json
+├── manifest.webmanifest
+├── icons/
+├── assets/
+│   └── scarlet-diaries-header.png
+└── functions/
 ```
 
 ---
@@ -101,12 +223,18 @@ The Scarlet Diaries is a Type 1 Diabetes support PWA built for a 9-year-old name
 ## Setup
 
 ### 1. Firebase project
-- Create a Firebase project at console.firebase.google.com
-- Enable Authentication (Email/Password)
-- Enable Firestore
+
+Create a Firebase project at Firebase Console.
+
+Enable:
+
+- Authentication → Email/Password
+- Firestore
 
 ### 2. firebase-config.js
+
 Fill in your project values:
+
 ```js
 export const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -119,40 +247,65 @@ export const firebaseConfig = {
 ```
 
 ### 3. Firestore rules
+
 Deploy the included `firestore.rules` file:
-```
+
+```bash
 firebase deploy --only firestore:rules
 ```
 
 ### 4. Host on GitHub Pages
-- Push all files to your GitHub repo
-- Enable GitHub Pages from Settings → Pages → Source: main branch / root
-- App loads at `https://yourusername.github.io/your-repo-name`
+
+- Push all files to your GitHub repo.
+- Enable GitHub Pages from Settings → Pages.
+- Source: main branch / root.
 
 ---
 
-## Accounts to create
+## Login notes
 
-On first use, create each account:
-1. Open the app
-2. Select the role (Amara, Mom, Dad, Tita)
-3. Enter email and password
-4. Click "Create account"
+### Demo Mode
 
-Suggested demo emails:
-- amara@scarletdiaries.demo
-- mom@scarletdiaries.demo
-- dad@scarletdiaries.demo
-- tita@scarletdiaries.demo
+Use PIN:
+
+```text
+1111
+```
+
+for:
+
+- Amara
+- Mom
+- Dad
+- Tita
+
+### Live Mode
+
+Before going live, an adult must set private PINs for each profile.
+
+Once Live Mode is active, demo PIN `1111` stops working.
 
 ---
 
 ## Medical settings
 
-Default ICR: **1 unit Apidra per 8g carbs**
-Default thresholds: Low 70 · High 180 · Urgent High 300
+Default ICR:
 
-Adults can update these from Adult Dashboard → Medical Settings.
+```text
+1 unit Apidra per 8g carbs
+```
+
+Default thresholds:
+
+```text
+Low 70 · High 180 · Urgent High 300
+```
+
+Adults can update these from:
+
+```text
+Adult Dashboard → Medical Settings
+```
 
 These are suggested estimates only. Always confirm with Amara's doctor or diabetes care team.
 
@@ -160,35 +313,17 @@ These are suggested estimates only. Always confirm with Amara's doctor or diabet
 
 ## Safety disclaimer
 
-This app is a demo. It is not a medical device. It does not provide medical advice. All insulin suggestions are estimates from a saved family plan. Adult confirmation is required before any insulin injection. Always follow the guidance of Amara's doctor and diabetes care team.
+This app is a demo. It is not a medical device. It does not provide medical advice.
+
+All insulin suggestions are estimates from a saved family plan. Adult confirmation is required before any insulin injection.
+
+Always follow the guidance of Amara's doctor and diabetes care team.
 
 ---
 
-*The Scarlet Diaries V2.5 · Every drop. Every breath. Unstoppable.*
+## Final checks for V2.6.3
 
-
-## V2.6 PIN Login + Live PIN Setup Hotfix
-
-- Replaced visible email/password login with profile + PIN login.
-- Demo Mode uses PIN `1111` for Amara, Mom, Dad, and Tita.
-- The app still signs into a separate Firebase Auth account for each role behind the scenes so Firestore logs, alerts, reports, and dashboards keep working.
-- Before switching to Live Mode, an adult must set private PINs for Amara, Mom, Dad, and Tita.
-- Once Live Mode is active, demo PIN `1111` stops working.
-- Adults can change Live PINs or return to Demo Mode from Adult Dashboard → App Mode.
-
-
-## V2.6.1 Login Hotfix
-
-If Firebase Auth or Firestore setup is not ready, demo PIN `1111` now opens the app in **Local Demo Mode** instead of blocking the demo at login.
-
-For full Firebase sync, enable:
-- Firebase Authentication → Sign-in method → Email/Password
-- Publish the included Firestore rules
-
-Local Demo Mode is only for visual/testing access. Live use should connect to Firebase.
-
-
-## V2.6.2 Header Integration
-- Added the Vampire Diaries-inspired Scarlet Diaries header image into the app.
-- Login screen now uses the custom Scarlet Diaries logo header.
-- App top bars now use the new branded header mark instead of the plain SD badge.
+- JavaScript syntax check passed.
+- Build string is `V2.6.3`.
+- V2.6.2 features were preserved.
+- The new daily check-in feature contains no banned breath/breathe/breathing wording.

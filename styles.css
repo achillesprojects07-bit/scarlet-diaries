@@ -616,3 +616,99 @@ p   { color: var(--text-primary); }
   .brand-mark{ width:92px; height:26px; }
   .brand-mark img{ width:86px; }
 }
+
+
+/* V2.6.3 gentle opening check-in */
+.checkin-screen{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(120,0,18,.24), transparent 34%),
+    linear-gradient(180deg, #050306, #12060b 58%, #050306);
+}
+.checkin-wrap{
+  width:min(100%, 560px);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:14px;
+}
+.checkin-logo{
+  width:min(92vw, 460px);
+  height:auto;
+  object-fit:contain;
+  filter:drop-shadow(0 12px 24px rgba(120,0,18,.35));
+}
+.checkin-card{
+  width:100%;
+  border:1px solid rgba(201,168,76,.26);
+  background:linear-gradient(180deg, rgba(18,8,12,.96), rgba(5,3,6,.98));
+  border-radius:28px;
+  padding:22px;
+  box-shadow:0 24px 60px rgba(0,0,0,.45);
+}
+.checkin-card h1{
+  font-family:'Cinzel', serif;
+  color:var(--ivory);
+  font-size:clamp(25px, 7vw, 42px);
+  line-height:1.1;
+  text-align:center;
+  margin:10px 0;
+}
+.checkin-label{
+  color:var(--gold);
+  text-align:center;
+  text-transform:uppercase;
+  letter-spacing:.18em;
+  font-size:11px;
+  font-weight:800;
+}
+.checkin-mood-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:18px;
+}
+.checkin-mood{
+  border:1px solid rgba(255,255,255,.1);
+  background:rgba(255,255,255,.045);
+  color:var(--ivory);
+  border-radius:18px;
+  min-height:78px;
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+}
+.checkin-mood span{
+  font-size:22px;
+}
+.checkin-mood strong{
+  font-size:13px;
+  text-align:center;
+}
+.checkin-mood:active{
+  transform:translateY(2px) scale(.99);
+}
+.custom-checkin-box{
+  margin-top:14px;
+}
+.checkin-card.response h1{
+  font-size:clamp(26px, 7vw, 44px);
+}
+.checkin-next{
+  color:var(--gold);
+  text-align:center;
+  font-size:16px;
+  line-height:1.5;
+  margin-top:14px;
+}
+@media (max-width:380px){
+  .checkin-card{padding:18px;border-radius:22px}
+  .checkin-mood-grid{gap:8px}
+}

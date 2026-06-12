@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID  = "amara";
 const APP_NAME  = "The Scarlet Diaries";
-const BUILD     = "V2.6.2";
+const BUILD     = "V2.6.3";
 const CIRCLE    = ["Mom", "Dad", "Tita"];
 const DEMO_PIN = "1111";
 const ROLE_AUTH_ACCOUNTS = {
@@ -101,6 +101,429 @@ const BADGES = [
   { id:"wall-proof",         section:"Courage",        name:"The Wall of Proof",     subtitle:"The proof was never perfection. It was staying.", desc:"Every badge on this wall is proof that you kept going no matter what.",           rule:"Unlock five or more courage badges." }
 ];
 
+const CHECKIN_QUESTIONS = [
+  "Before we begin — how is your heart today, Amara?",
+  "Hey Amara. Sit for one second. What do you feel?",
+  "Before anything else — what is your heart carrying right now?",
+  "Good to see you. How are you, really?",
+  "Before we start — check in with yourself. What is there?",
+  "Amara. You showed up. How does that feel today?",
+  "One honest word — how is your heart right now?",
+  "Before the day begins — what does your body feel?",
+  "No right answer here. How are you doing?",
+  "This is just for you. How are you feeling today?",
+  "Before anything else — what is alive in you right now?",
+  "You are here. That matters. How do you feel?",
+  "Just between us — how is today treating you so far?",
+  "Before we go — what is your heart saying?",
+  "Amara, take a moment. What are you feeling right now?",
+  "The diary is open. How are you today?",
+  "Before the numbers and the meals — how is your heart?",
+  "One moment just for you. What do you feel right now?",
+  "You made it here. How does that feel today?",
+  "Before anything else — are you okay?",
+  "Hey. Just checking in. How are you?",
+  "The Scarlet Diaries is listening. How are you today?",
+  "What is your heart carrying into this moment?",
+  "Today is a new page. How are you starting it?",
+  "Before the day asks anything of you — how are you?",
+  "This moment belongs to you. What do you feel?",
+  "Amara — no performance needed here. How are you really?",
+  "Before anything else — how is your body feeling today?",
+  "Just one honest check — how are you doing right now?",
+  "The vault is yours. How are you walking into it today?",
+  "Before we go anywhere — what does your heart need to say?",
+  "You came back. How are you feeling today?",
+  "No wrong answer exists here. How are you?",
+  "Before the day takes over — what do you feel right now?",
+  "Amara. Be still for a second. What is there?",
+  "What is the first feeling that comes when you sit quietly?",
+  "Before we begin — what would your heart say if it could talk?",
+  "Just you and this screen right now. How are you?",
+  "Before anything else — check in with yourself. What is alive?",
+  "Today gets to start with you. How are you feeling?",
+  "The diary is waiting. How is your heart today?",
+  "One moment before the world begins. How are you?",
+  "Before the food and the numbers — how is Amara today?",
+  "How are you carrying yourself into this day?",
+  "Before we begin — what do you wish someone would ask you?",
+  "You are safe here. How are you feeling right now?",
+  "The Scarlet Diaries sees you. How are you today?",
+  "Before anything else — just be still. What do you feel?",
+  "Before we begin — what is the truest thing about how you feel right now?",
+  "You opened this app. That took something. How are you today?"
+];
+
+const CHECKIN_RESPONSES = {
+  "brave": [
+    "That courage is real. Let's go.",
+    "Brave looks good on you today.",
+    "That feeling is a gift. Hold onto it.",
+    "You are ready. The diary is ready. Let's begin.",
+    "Brave is not the absence of fear. It is showing up anyway. You did.",
+    "That is the energy. Let's carry it through the day.",
+    "Something about today is already working.",
+    "Brave Amara. The best kind.",
+    "That is your heart speaking clearly. Trust it today.",
+    "You brought your whole self. That is everything.",
+    "That feeling is earned. You earned it.",
+    "Today you start ahead. Let's keep it.",
+    "Brave is your default setting. Today it is showing.",
+    "That is real. That is yours. Nobody can take that.",
+    "Carry that into the day. It will hold you.",
+    "The vault recognizes this. So do we.",
+    "Whatever today brings — you already have what you need.",
+    "That is not small. That is everything.",
+    "You walked in brave. Walk through the day the same way.",
+    "This is a good beginning.",
+    "Today feels like a strong page in your story.",
+    "Brave showed up before anything else today. That counts.",
+    "That courage does not need to be loud. It just needs to be real. It is.",
+    "You are already doing it.",
+    "That is the version of you that the world needs today.",
+    "Brave and here. That is the whole requirement.",
+    "Your heart is clear today. Follow it.",
+    "That feeling is a compass. Use it.",
+    "You are in a good place to face whatever comes.",
+    "Something brave already happened — you opened this app.",
+    "Brave is a choice you make before the day begins. You made it.",
+    "That is quiet strength. The best kind.",
+    "Your heart is pointing forward. That is enough.",
+    "That feeling belongs to you. Nobody gave it to you. You built it.",
+    "Today has good bones.",
+    "The Scarlet Vault sees this. So do the people who love you.",
+    "Brave and steady. Let's go.",
+    "Today is already starting right.",
+    "You showed up with your whole chest. That matters.",
+    "That is the feeling that gets you through hard days. Keep it close.",
+    "Today you are the version of yourself you want to be. Stay there.",
+    "Brave does not always feel like a roar. Sometimes it feels exactly like this.",
+    "You are walking in ready. That is a gift to yourself.",
+    "Your heart is in good shape today. Let's take care of it.",
+    "That is real courage — not because nothing is hard, but because you came anyway.",
+    "Today is yours to shape. You are holding the pen.",
+    "Brave Amara walked in today. The rest follows.",
+    "That feeling is a signal — today you are exactly where you need to be.",
+    "You are ahead of yourself in the best way.",
+    "Let's honor that by making today a good page."
+  ],
+  "okay": [
+    "Okay is enough. You showed up.",
+    "Okay is honest. That already makes it good.",
+    "Okay is a whole feeling. It is valid.",
+    "Not every day is loud. Some days are just okay. That is fine.",
+    "Okay means you are here. That is the whole job.",
+    "Steady is underrated. You are steady today.",
+    "Okay is not a small thing. It means you are holding.",
+    "You are upright and present. That is the requirement.",
+    "Okay is where most brave days start.",
+    "You are in the middle — and the middle is safe ground.",
+    "Okay means nothing broke today yet. That is a win.",
+    "Steady and here. That is enough.",
+    "Not every day needs to be great. Today can just be okay.",
+    "Okay is honest. Honest is brave.",
+    "You showed up as exactly what you are. That is right.",
+    "Okay today might become something else by tonight. Or it might stay okay. Both are fine.",
+    "You are not behind. You are exactly where you are.",
+    "Okay is a full answer. Nothing is missing from it.",
+    "Some of the best days start as okay.",
+    "You are present. That is not nothing.",
+    "Okay is not giving up. It is being real.",
+    "You are holding steady. That takes something.",
+    "Okay and honest beats perfect and pretending.",
+    "There is dignity in okay. You are carrying it.",
+    "Today does not need to be extraordinary. It just needs to be yours.",
+    "Okay is a place to settle from.",
+    "You are neither sinking nor flying. You are walking. That works.",
+    "Okay is a foundation. You can build from here.",
+    "Not every moment is a peak. Most life happens in the okay.",
+    "You are functioning and present and honest. That is three things.",
+    "Okay means you have room. Room to feel more, or to rest, or to just be.",
+    "Steady is strength in disguise.",
+    "You came in as you are. That is always the right choice.",
+    "Okay and real is better than great and pretend.",
+    "You are exactly where you are, and that is allowed.",
+    "Some days are just Wednesday. Today might be a Wednesday. That is okay.",
+    "You are not broken. You are just okay today. There is a difference.",
+    "Okay is a place to land.",
+    "You are holding the line. That matters.",
+    "Not every feeling needs to be analyzed. Sometimes okay just is.",
+    "You are present and accounted for. The diary is glad.",
+    "Okay is an honest place to stand.",
+    "Sometimes the bravest thing is just existing without drama. You are doing it.",
+    "You are enough as you are right now in this okay moment.",
+    "The world still turns in okay. So do you.",
+    "You showed up without pretending. That is integrity.",
+    "Okay is the most common human feeling. You are not alone in it.",
+    "You are in the quiet middle. It is safe here.",
+    "Okay today. Maybe more tomorrow. Either way, you are here.",
+    "Okay is a complete sentence. So is this: you are enough."
+  ],
+  "tired": [
+    "Rest is brave too. We will be gentle today.",
+    "Tired is honest. Your body is telling you something true.",
+    "You still came. That is not nothing.",
+    "Tired means you have been working hard at something. Honor that.",
+    "We will take it slow today. No rush.",
+    "Being tired and still showing up — that is quiet strength.",
+    "Your body deserves to be heard. We hear it.",
+    "Tired is not failure. Tired is human.",
+    "You do not have to perform today. Just be here.",
+    "Even tired, you opened this app. That took something.",
+    "Rest when you can. We will be here when you return.",
+    "Tired today does not mean tired forever.",
+    "Some of the bravest moments happen when we are exhausted. This might be one.",
+    "You do not need to be at full power to be worthy of care.",
+    "Tired is a signal, not a verdict.",
+    "Even running low, you showed up. That counts in the vault.",
+    "Let's be easy today. You deserve that.",
+    "Tired hearts need gentle handling. We will be gentle.",
+    "You carried yourself here on empty. That took strength.",
+    "Rest is not giving up. It is resetting.",
+    "Today we move slowly and that is exactly right.",
+    "Tired is allowed. You do not need permission but here it is anyway.",
+    "You are here even when it costs you. That is devotion.",
+    "The diary does not require your best today. Just your honest.",
+    "Tired means something was felt, something was done, something was carried. That is real.",
+    "We will not ask too much of you today.",
+    "Exhausted and still here — that is a kind of courage.",
+    "Your tiredness is valid. So is your presence despite it.",
+    "Even a dim light is still light. You are still here.",
+    "Tired today. Rested soon. Both are true.",
+    "You do not have to be strong right now. You just have to be here.",
+    "The world can wait a moment while you settle.",
+    "Tired is not the enemy. Ignoring tired is.",
+    "You listened to yourself today. That is a form of wisdom.",
+    "Even slow steps move forward.",
+    "You showed up tired and that is the whole win today.",
+    "Rest when the day allows. The diary will be here.",
+    "Tired means real. Real is always welcome here.",
+    "A tired heart still beats. Yours is beating. That is everything.",
+    "You do not owe anyone energy you do not have.",
+    "Tired and honest beats awake and pretending.",
+    "Take care of the tired first. Everything else follows.",
+    "Even on empty, you came. The vault sees that.",
+    "You are allowed to move at whatever pace today requires.",
+    "Tired is not permanent. But it is real right now, and that matters.",
+    "Being here tired is still being here. It counts the same.",
+    "We will not rush you. Today is a slow day and that is okay.",
+    "You brought what you had. That is always enough.",
+    "Tired is the body asking for kindness. Give it some today.",
+    "Even tired, you are still Amara. That is still everything."
+  ],
+  "sad": [
+    "Sadness is not weakness. You are not alone.",
+    "Sad is a real feeling. It belongs here.",
+    "You are allowed to feel this. Fully and without apology.",
+    "Sad means something matters to you. That is not nothing.",
+    "The diary holds this with you.",
+    "Sad is not forever. But it is real right now and that deserves space.",
+    "You named it. That is the first brave thing.",
+    "Even in sadness, you showed up. That matters.",
+    "This is a safe place for sad. Nothing here will shame you.",
+    "Sadness is not a flaw. It is a signal from your heart.",
+    "You do not have to fix it right now. Just feel it.",
+    "Sad and here is still here. You are not lost.",
+    "The weight is real. You do not have to carry it alone.",
+    "Your sadness is valid. You do not need a reason that makes sense to anyone else.",
+    "Sad days are part of a full life. You are living fully.",
+    "You are not too much. Your feelings are not too much.",
+    "The vault holds every feeling — especially this one.",
+    "Sad is honest. Honest is always welcome here.",
+    "You do not have to perform happiness today.",
+    "Sad and brave can exist at the same time. You are both right now.",
+    "This feeling will not swallow you. You are bigger than it.",
+    "Some days are heavy. Today might be one. That is allowed.",
+    "You are held, even when it does not feel that way.",
+    "The Scarlet Diaries was made for days exactly like this.",
+    "Sad is not a problem to be solved. It is a feeling to be felt.",
+    "Your heart is speaking. This is a place where it is heard.",
+    "You are not broken. You are sad. There is a difference.",
+    "Sad days still count. You still count.",
+    "Something is heavy today and you are still carrying it. That is strength.",
+    "You are seen. Even in this.",
+    "Sadness sometimes means you loved something. That is not small.",
+    "You do not have to explain your sadness. It is enough that it is real.",
+    "The people who built this diary love you on your sad days too.",
+    "You brought your real self today. That is always the right choice.",
+    "Sad is a color in the full picture of who you are. It belongs.",
+    "Even in the hard feeling, you are not alone in this app.",
+    "Today we sit with it. We do not rush past it.",
+    "Your heart is working through something. Let it.",
+    "Sad and still here is a form of resilience.",
+    "You feel it deeply because you care deeply. That is not weakness.",
+    "The diary was made for this feeling especially.",
+    "You are not too sensitive. You are real.",
+    "This sadness has a place. Right here. Leave it here.",
+    "Even on a sad day, you came back. The vault remembers.",
+    "Sad does not mean wrong. It means human.",
+    "You are surrounded by more love than you can feel right now. That love is still real.",
+    "The feeling is heavy but you are holding it. That is something.",
+    "Sad is not the end of anything. It is the middle of something real.",
+    "You are brave for feeling this instead of hiding it.",
+    "The Scarlet Diaries holds sad days with the same care as brave ones."
+  ],
+  "angry": [
+    "Anger means something matters. That is valid.",
+    "Angry is honest. This is a place for honest.",
+    "Something is not okay and your heart knows it. That is information.",
+    "You are allowed to be angry. Fully.",
+    "Angry is not wrong. It is a signal.",
+    "The feeling is real. We do not shame it here.",
+    "Something pushed back at you and you pushed back at it. That is alive.",
+    "Anger is a protector. It shows up when something needs defending.",
+    "You do not have to be settled today. You just have to be honest.",
+    "Angry and here is still here. The diary sees you.",
+    "Something is not sitting right and your body is telling you. Listen to it.",
+    "Anger is energy. It means your heart is still fighting.",
+    "You named it instead of hiding it. That is brave.",
+    "Angry is not a problem. It is a feeling that belongs here.",
+    "The Scarlet Diaries does not require you to be pleasant. It requires you to be real.",
+    "Something happened or is happening and it is not okay. Your anger is right.",
+    "Anger is not the opposite of love. Sometimes it is love defending itself.",
+    "You do not owe anyone peace you do not feel.",
+    "Angry is a complete and valid way to arrive today.",
+    "The vault holds angry days with the same care as brave ones.",
+    "You brought your real feeling. That is always the right choice.",
+    "Anger is information. What is it telling you?",
+    "Something is asking to be addressed. Your anger is pointing at it.",
+    "You do not have to fix the anger. Just feel it safely here.",
+    "Angry means alive. Alive is good.",
+    "You are not too much. Your anger is not too much.",
+    "The feeling is real and it belongs here just as much as any other.",
+    "Angry and showing up is still showing up.",
+    "Something is not right and you know it. That knowing matters.",
+    "You are not broken for feeling this. You are honest.",
+    "Anger held with awareness is not destructive. It is information.",
+    "You can be angry and still be Amara. Both are true.",
+    "The diary was built for days like this especially.",
+    "Angry days still get recorded in the vault. They still count.",
+    "Something deserves to be felt right now. Feel it.",
+    "Your anger is a form of caring. It means something mattered enough to fight for.",
+    "You are allowed to not be okay with what is not okay.",
+    "This feeling is valid. No explanation required.",
+    "Anger is often sadness with nowhere to go. Both are welcome here.",
+    "You brought the real thing today. That takes guts.",
+    "Even angry, you are still worthy of every good thing.",
+    "The feeling is loud today and that is allowed.",
+    "Angry means your heart has not given up. That is something.",
+    "You do not need to perform settled. Just be real.",
+    "This is a safe place to put this down for a moment.",
+    "Anger is not a character flaw. It is a human response to real things.",
+    "You felt it and named it. The first step is always that.",
+    "Even in the fire, you are still here. That counts.",
+    "The vault sees anger as proof of a heart that still cares.",
+    "Whatever sparked this — your feeling about it is valid."
+  ],
+  "custom": [
+    "Whatever it is — it belongs here.",
+    "The feeling does not need a name to be real.",
+    "You found your own word. That is the bravest kind of honesty.",
+    "Whatever lives in that word — the diary holds it.",
+    "Your own language is the most accurate one.",
+    "That word is yours. No one else could have found it.",
+    "Something real that only you could name. The vault holds it.",
+    "You went past the list. That takes self-knowledge.",
+    "The feeling is real even without a common word for it.",
+    "Your version of this feeling is valid.",
+    "You named something true. That is the whole point.",
+    "Whatever is in that word — we receive it.",
+    "Beyond the usual words is where the real stuff lives. You went there.",
+    "That is a feeling only you could have found. It belongs here.",
+    "The diary was made for exactly this — feelings that do not fit the list.",
+    "You found language for something hard to say. That is courage.",
+    "Whatever that word carries — it is safe here.",
+    "The most honest feelings are often the ones that need new words.",
+    "You did not settle for approximate. You found the real one.",
+    "That word is a key to something true. Keep it.",
+    "Your feeling is not smaller because it is unnamed by others.",
+    "You reached past the obvious and found something real. That matters.",
+    "Whatever it is — it is seen here.",
+    "Your language for your feeling is always more accurate than anyone else's.",
+    "That took courage — going past the given options to find the true one.",
+    "The diary expands to hold whatever you bring. Even this.",
+    "Some feelings do not have common names yet. Yours might be one of them.",
+    "You trusted yourself to name it. That is self-knowledge.",
+    "The word you chose is the right one. Only you could know that.",
+    "Whatever lives in that word — the vault marks it as yours.",
+    "Naming your own feeling is one of the most powerful things a person can do.",
+    "You went looking for the honest word. You found it.",
+    "Your feeling is not less real for being hard to name.",
+    "That is your private language for your private truth. It belongs here.",
+    "The most important feelings are often the ones that resist easy labels.",
+    "You trusted your own knowing today. That is wisdom.",
+    "Whatever that is — it is welcome in the Scarlet Diaries.",
+    "That word holds something only you fully understand. Respect that.",
+    "You went deeper than the list. The diary goes that deep too.",
+    "Your own word for your own feeling. That is complete honesty.",
+    "Something true that only Amara could have said. The vault holds it.",
+    "The feeling is real. Your word for it is real. Both belong here.",
+    "You resisted approximation. You found the true thing. That takes courage.",
+    "Whatever is in that word — we receive it without judgment.",
+    "Your language is always the most accurate language for your experience.",
+    "Some of the most important human moments resist common vocabulary. This might be one.",
+    "You found your word. Now let the diary hold it.",
+    "That is the kind of honesty this app was built for.",
+    "Whatever that word means to you — it matters here.",
+    "You named something real. That is the whole brave thing."
+  ]
+};
+
+const CHECKIN_NEXTSTEPS = [
+  "Before we start — drink one glass of water.",
+  "Shake out your hands. Both of them. Then let's begin.",
+  "Put both feet flat on the floor. Feel the ground. Now we go.",
+  "Look around and name three things you can see right now.",
+  "Roll your shoulders back once. That is enough.",
+  "Take three slow blinks. Let your eyes rest for a moment.",
+  "Press your hands together for a moment. Then we begin.",
+  "Count slowly to ten before we begin. Take your time.",
+  "Name one thing in the room that is your favorite color.",
+  "Stretch your arms above your head for three seconds. Then we go.",
+  "Put one hand on your chest. Feel your heartbeat for a moment.",
+  "Look out a window for five seconds. Then come back.",
+  "Name something you are grateful for — even something very small.",
+  "Wiggle your toes. Both feet. Then we begin.",
+  "Let your shoulders drop. Just let them fall. Then we go.",
+  "Close your eyes for three seconds. Then open them and we go.",
+  "Drink something warm or cold before we start if you can.",
+  "Name one thing your body is doing right now — sitting, feeling, existing.",
+  "Tap your fingers on something solid near you. Feel the texture.",
+  "Count backward from ten to one, slowly.",
+  "Think of one person who loves you. Hold that for a second.",
+  "Notice how your seat feels beneath you. Be in your body for a moment.",
+  "Name one thing that made you smile in the last few days.",
+  "Press your feet into the floor and just be still for a moment.",
+  "Look at your hands. Then we begin.",
+  "Name one color you love. Hold it in your mind for a second.",
+  "Blink slowly three times.",
+  "Hum quietly for three seconds. Just to yourself.",
+  "Name one smell you love. Then we go.",
+  "Put both palms flat on a surface near you. Feel it. Then we begin.",
+  "Count five things you can feel right now — temperature, texture, pressure.",
+  "Let your jaw unclench. Just notice it and let it go.",
+  "Think of one place where you feel safe. Hold it for a moment.",
+  "Stretch your fingers wide apart. Hold for three seconds. Release.",
+  "Name one thing your body did for you today just by existing.",
+  "Tap your heart three times gently. Then we go.",
+  "Let your face relax. No expression needed right now.",
+  "Name one word that describes something good — anything good at all.",
+  "Remember — you are allowed to be exactly as you are today.",
+  "Look at something far away for five seconds. Then come back.",
+  "Name one thing you are looking forward to — today or any day.",
+  "Let your hands rest open in your lap for a moment.",
+  "Notice one sound you can hear right now.",
+  "Think of one food you love. Then we begin.",
+  "Say your own name quietly to yourself. Just once.",
+  "Roll your wrists in slow circles. Both hands. Then we go.",
+  "Name one person who makes you laugh.",
+  "Let your shoulders move away from your ears. Just notice them.",
+  "Think of your favorite place. Just for a moment.",
+  "Notice one thing about today that is different from yesterday."
+];
+
+function randItem(arr){ return arr[Math.floor(Math.random() * arr.length)]; }
+
 // ── APP STATE ────────────────────────────────────────────────
 let state = {
   user:            null,
@@ -119,7 +542,8 @@ let state = {
   foodSearch:      "",
   meal: { type:null, glucose:null, items:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" },
   highFlow: { glucose:null, ketones:null, symptoms:[], recentApidra:null },
-  lowFlow:  { glucose:null, fastSugar:null, adult:null, recheck:null }
+  lowFlow:  { glucose:null, fastSugar:null, adult:null, recheck:null },
+  checkinCheckedToday:false
 };
 
 const $app = document.getElementById("app");
@@ -157,9 +581,12 @@ function fmtDate(ts){
 }
 
 // ── ROUTER ───────────────────────────────────────────────────
-function render(){
+async function render(){
   if(!state.user) return renderLogin();
   if(state.role === "adult") return renderAdult();
+  if(state.view === "home" || !state.view){
+    if(await maybeRenderDailyCheckin()) return;
+  }
   switch(state.view){
     case "meal":    return renderMealStart();
     case "high":    return renderHighSugar();
@@ -563,6 +990,183 @@ function renderFlowDone({ title="Saved", message="", next=[] } = {}){
 }
 
 // ── HOME ─────────────────────────────────────────────────────
+
+function todayKey(){
+  return new Date().toISOString().slice(0,10);
+}
+
+async function hasDoneCheckinToday(){
+  if(state.firebaseOffline){
+    return localStorage.getItem(`scarletDailyCheckin:${todayKey()}`) === "yes";
+  }
+  try{
+    const snap = await getDocs(
+      query(
+        collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"),
+        where("source","==","daily-checkin"),
+        where("dateKey","==",todayKey()),
+        limit(1)
+      )
+    );
+    return !snap.empty;
+  }catch(e){
+    console.warn("Daily check-in check skipped:", e);
+    return true;
+  }
+}
+
+async function maybeRenderDailyCheckin(){
+  if(state.role !== "child") return false;
+  if(state.view !== "home") return false;
+  if(state.checkinCheckedToday) return false;
+  const done = await hasDoneCheckinToday();
+  state.checkinCheckedToday = true;
+  if(done) return false;
+  renderDailyCheckin();
+  return true;
+}
+
+function renderDailyCheckin(){
+  const selectedQuestion = randItem(CHECKIN_QUESTIONS);
+  const moods = [
+    {key:"brave", label:"Brave", icon:"🗡️"},
+    {key:"okay", label:"Okay", icon:"🌙"},
+    {key:"tired", label:"Tired", icon:"🕯️"},
+    {key:"sad", label:"Sad", icon:"💧"},
+    {key:"angry", label:"Angry", icon:"🔥"},
+    {key:"custom", label:"Something only I can name", icon:"✒️"}
+  ];
+  $app.innerHTML = `
+    <section class="screen checkin-screen">
+      <div class="checkin-wrap">
+        <img class="checkin-logo" src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" />
+        <div class="checkin-card">
+          <p class="checkin-label">just for you</p>
+          <h1>${esc(selectedQuestion)}</h1>
+          <p class="muted">There is no wrong answer.</p>
+          <div class="checkin-mood-grid">
+            ${moods.map(m => `<button class="checkin-mood" data-mood="${m.key}"><span>${m.icon}</span><strong>${m.label}</strong></button>`).join("")}
+          </div>
+          <div id="customCheckinBox" class="custom-checkin-box" style="display:none">
+            <div class="field">
+              <label>Your own word</label>
+              <input id="customCheckinText" placeholder="Write the word only you know" />
+            </div>
+            <button class="btn scarlet full" id="continueCustomCheckin">Continue</button>
+          </div>
+          <button class="btn secondary full" style="margin-top:12px" id="skipCheckinToday">Skip for now</button>
+        </div>
+      </div>
+    </section>`;
+  bindGlobal();
+
+  async function chooseMood(moodKey, customText=""){
+    const selectedResponse = randItem(CHECKIN_RESPONSES[moodKey] || CHECKIN_RESPONSES.custom);
+    const selectedNextStep = randItem(CHECKIN_NEXTSTEPS);
+    await saveDailyCheckin({ moodKey, customText, selectedQuestion, selectedResponse, selectedNextStep });
+    renderDailyCheckinResponse({ moodKey, customText, selectedResponse, selectedNextStep });
+  }
+
+  document.querySelectorAll("[data-mood]").forEach(btn => btn.onclick = () => {
+    const mood = btn.dataset.mood;
+    if(mood === "custom"){
+      document.getElementById("customCheckinBox").style.display = "block";
+      setTimeout(() => document.getElementById("customCheckinText")?.focus(), 80);
+      return;
+    }
+    chooseMood(mood);
+  });
+
+  document.getElementById("continueCustomCheckin").onclick = () => {
+    const text = document.getElementById("customCheckinText").value.trim();
+    if(!text) return toast("Write one word or short phrase.");
+    chooseMood("custom", text);
+  };
+
+  document.getElementById("skipCheckinToday").onclick = () => {
+    state.checkinCheckedToday = true;
+    renderHome();
+  };
+}
+
+async function saveDailyCheckin({ moodKey, customText, selectedQuestion, selectedResponse, selectedNextStep }){
+  const key = todayKey();
+  if(state.firebaseOffline){
+    localStorage.setItem(`scarletDailyCheckin:${key}`, "yes");
+    const logs = JSON.parse(localStorage.getItem("scarletLocalMoodLogs") || "[]");
+    logs.unshift({ mood:moodKey, moodCustom:customText || null, source:"daily-checkin", dateKey:key, createdAt:new Date().toISOString() });
+    localStorage.setItem("scarletLocalMoodLogs", JSON.stringify(logs.slice(0,100)));
+  }else{
+    await addDoc(
+      collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"),{
+        mood: moodKey,
+        moodCustom: customText || null,
+        source: "daily-checkin",
+        dateKey: key,
+        questionShown: selectedQuestion,
+        responseShown: selectedResponse,
+        nextStepShown: selectedNextStep,
+        createdAt: serverTimestamp(),
+        enteredBy: state.user.uid
+      }
+    );
+    if(customText){
+      await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"),{
+        mood:"custom",
+        prompt:"Daily check-in",
+        entry:customText,
+        source:"daily-checkin",
+        privacy:"private",
+        createdAt:serverTimestamp(),
+        enteredBy:state.user.uid
+      });
+    }
+  }
+
+  await unlockBadge("steady-spark");
+  if(["sad","angry","tired"].includes(moodKey)){
+    await unlockBadge("girl-who-stayed");
+    await unlockBadge("truth-teller");
+  }
+  if(["sad","angry"].includes(moodKey)) await unlockBadge("soft-monster-tamer");
+  if(moodKey === "sad") await unlockBadge("moonlit-heart");
+  if(customText) await unlockBadge("brave-page");
+}
+
+function renderDailyCheckinResponse({ moodKey, customText, selectedResponse, selectedNextStep }){
+  let wentHome = false;
+  $app.innerHTML = `
+    <section class="screen checkin-screen">
+      <div class="checkin-wrap">
+        <img class="checkin-logo" src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" />
+        <div class="checkin-card response">
+          <p class="checkin-label">${esc(customText || moodKey)}</p>
+          <h1>${esc(selectedResponse)}</h1>
+          <p class="checkin-next">${esc(selectedNextStep)}</p>
+          <div class="grid single" style="margin-top:18px">
+            <button class="action scarlet" id="checkinWrite"><strong>Write a Scarlet Entry</strong><span>Put the feeling somewhere safe.</span></button>
+            <button class="action" id="checkinHome"><strong>Go home</strong><span>Start the app.</span></button>
+          </div>
+        </div>
+      </div>
+    </section>`;
+  bindGlobal();
+  const goHome = () => {
+    if(wentHome) return;
+    wentHome = true;
+    renderHome();
+  };
+  document.getElementById("checkinHome").onclick = goHome;
+  document.getElementById("checkinWrite").onclick = () => {
+    if(wentHome) return;
+    wentHome = true;
+    state.view = "diary";
+    renderDiary();
+  };
+  setTimeout(goHome, 3000);
+}
+
+
 function renderHome(){
   layout(`
     <div class="card dark">
@@ -1811,7 +2415,7 @@ function renderDemoReset(){
     }catch(err){
       console.error(err); restore();
       toast(String(err.message||"").toLowerCase().includes("permission")
-        ? "Reset blocked by Firestore rules. Publish the V2.5 rules."
+        ? "Reset blocked by Firestore rules. Publish the V2.6.3 rules."
         : "Reset failed. Please try again.");
     }
   };
@@ -2252,12 +2856,17 @@ async function loadCourageSummary(){
   const card = document.getElementById("courageCard");
   if(!card) return;
   try{
-    const bSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
-    const dSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), limit(200)));
-    const aSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"alerts"), limit(200)));
+    const childPath = name => collection(db,"families",FAMILY_ID,"children",CHILD_ID,name);
+    const [bSnap, dSnap, aSnap, moodSnap] = await Promise.all([
+      getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks")),
+      getDocs(query(childPath("diaryEntries"), limit(200))),
+      getDocs(query(collection(db,"families",FAMILY_ID,"alerts"), limit(200))),
+      getDocs(query(childPath("moodLogs"), where("source","==","daily-checkin"), orderBy("createdAt","desc"), limit(200)))
+    ]);
 
     const badgeCount   = bSnap.size;
     const diaryCount   = dSnap.size;
+    const checkinCount = moodSnap.size;
     const helpCount    = aSnap.docs.filter(d => d.data().type === "circle_call").length;
     const safetyCount  = aSnap.docs.filter(d => ["low_alert","stacking_warning","high_symptoms","ketones_moderate_large"].includes(d.data().type)).length;
 
@@ -2267,16 +2876,24 @@ async function loadCourageSummary(){
       return tb - ta;
     })[0]?.data();
 
+    const latestCheckin = moodSnap.docs[0]?.data();
+    const latestCheckinText = latestCheckin
+      ? `Last check-in: ${esc(latestCheckin.moodCustom || latestCheckin.mood || "feeling")} · ${esc(latestCheckin.dateKey || fmtDate(latestCheckin.createdAt))}`
+      : "No daily check-ins yet.";
+
     card.innerHTML = `
       <div class="courage-grid">
         <div class="courage-stat"><div class="n">${badgeCount}</div><div class="l">Badges earned</div></div>
         <div class="courage-stat"><div class="n">${diaryCount}</div><div class="l">Diary entries</div></div>
+        <div class="courage-stat"><div class="n">${checkinCount}</div><div class="l">Daily check-ins</div></div>
         <div class="courage-stat"><div class="n">${helpCount}</div><div class="l">Help requests</div></div>
         <div class="courage-stat"><div class="n">${safetyCount}</div><div class="l">Safety steps</div></div>
         <div class="courage-stat" style="grid-column:span 2"><div class="n" style="font-size:14px;color:var(--gold)">${latestBadge ? esc(latestBadge.name) : "No badges yet"}</div><div class="l">Latest badge</div></div>
       </div>
-      <p class="small muted" style="margin-top:12px;font-style:italic">"Celebrate effort, not perfect glucose."</p>`;
+      <p class="small muted" style="margin-top:12px">${latestCheckinText}</p>
+      <p class="small muted" style="margin-top:8px;font-style:italic">"Celebrate effort, not perfect glucose."</p>`;
   }catch(err){
+    console.error(err);
     if(card) card.innerHTML = `<div class="empty-state"><p>Courage summary could not load.</p></div>`;
   }
 }
