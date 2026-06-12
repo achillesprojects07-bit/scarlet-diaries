@@ -1,6 +1,6 @@
-# The Scarlet Diaries — V2.6.5
+# The Scarlet Diaries — V2.6.6
 
-**Build name:** Softer Amara Home + Lantus Shortcut Fix
+**Build name:** Pink Background Refinement
 **Base preserved from:** V2.6.2 Include-All Header Build  
 **Tagline:** Every drop. Every breath. Unstoppable.
 
@@ -366,3 +366,10 @@ Changed:
 - The Home shortcut now logs Lantus basal insulin only.
 - Apidra remains inside the meal/correction safety flows, not the Lantus shortcut.
 - Preserved V2.6.4 check-in behavior.
+
+
+---
+
+## V2.6.6 — Pink Background Refinement
+
+Changed the child-facing app background from soft plum/burgundy to a warmer pink diary palette while keeping Scarlet Diaries contrast, scarlet accents, and readable cards.
