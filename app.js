@@ -1,346 +1,176 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
   getFirestore, collection, addDoc, setDoc, doc, getDoc, getDocs, query,
-  where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc, deleteDoc, writeBatch,
-  initializeFirestore, persistentLocalCache, persistentMultipleTabManager
+  where, orderBy, limit, serverTimestamp, onSnapshot, updateDoc, deleteDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 import { firebaseConfig } from "./firebase-config.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const app = initializeApp(firebaseConfig);
-// Offline persistence: glucose/insulin logs save locally without signal and
-// sync to Firebase automatically when the connection returns.
-let db;
-try{
-  db = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-  });
-}catch(e){
-  console.warn("Persistent cache unavailable, using default Firestore:", e);
-  db = getFirestore(app);
-}
 const auth = getAuth(app);
-
-// Sign in anonymously so Firestore security rules can require request.auth != null.
-// Enable "Anonymous" provider in Firebase Console → Authentication → Sign-in method.
-// Gracefully ignored if the provider isn't enabled yet.
-async function ensureFirebaseAuth(){
-  try{
-    if(!auth.currentUser) await signInAnonymously(auth);
-  }catch(e){
-    console.warn("Anonymous auth not enabled yet — see SETUP.md:", e?.code || e);
-  }
-}
+const db = getFirestore(app);
 
 const FAMILY_ID = "scarlet-family";
-const CHILD_ID = "amara";
-const APP_NAME = "The Scarlet Diaries";
-const BUILD = "V5.0.1";
-const CIRCLE = ["Mom", "Dad", "Tita"];
+const CHILD_ID  = "amara";
+const APP_NAME  = "The Scarlet Diaries";
+const BUILD     = "V2.5";
+const CIRCLE    = ["Mom", "Dad", "Tita"];
 
-// ── PASSCODE SYSTEM ──────────────────────────────
-// Passcodes are hashed before storing — never plain text
-async function hashCode(str){
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
-}
-
-const ROLES = {
-  amara: { label:"Amara",  icon:"🩸", type:"child" },
-  mom:   { label:"Mom",    icon:"🌙", type:"adult" },
-  dad:   { label:"Dad",    icon:"⚡", type:"adult" },
-  tita:  { label:"Tita",   icon:"🔮", type:"adult" }
-};
-
-async function verifyPasscode(roleKey, code){
-  try {
-    const hashed = await hashCode(code.trim());
-    const snap = await getDoc(doc(db,"families",FAMILY_ID,"passcodes",roleKey));
-    if(!snap.exists()) return false;
-    return snap.data().hash === hashed;
-  } catch(e) {
-    console.error("Passcode verify error:", e);
-    return false;
-  }
-}
-
-async function savePasscode(roleKey, code){
-  const hashed = await hashCode(code.trim());
-  await setDoc(doc(db,"families",FAMILY_ID,"passcodes",roleKey), {
-    hash: hashed,
-    updatedAt: serverTimestamp()
-  });
-}
-
-let passcodesEnsured = false;
-async function ensurePasscodes(){
-  // Seeds default passcodes if they don't exist yet (runs once per session)
-  if(passcodesEnsured) return;
-  const defaults = { amara:"Amara16", mom:"Neri01", dad:"George13", tita:"Aileen07" };
-  for(const [role, code] of Object.entries(defaults)){
-    const snap = await getDoc(doc(db,"families",FAMILY_ID,"passcodes",role));
-    if(!snap.exists()){
-      await savePasscode(role, code);
-    }
-  }
-  passcodesEnsured = true;
-}
-
+// ── DEFAULT SETTINGS ─────────────────────────────────────────
 const DEFAULT_SETTINGS = {
-  childName: "Amara",
-  rapidInsulin: "Apidra",
-  basalInsulin: "Lantus",
-  carbRatio: 8,
-  targetGlucose: 120,
-  correctionFactor: 50,
-  lantusMorningDose: 20,
-  lantusNightDose: 8,
-  lantusMorningStart: "06:00",
-  lantusMorningEnd: "10:00",
-  lantusNightStart: "19:00",
-  lantusNightEnd: "22:00",
-  doseRounding: 1,
-  maxSingleDose: 15,
-  lowThreshold: 70,
-  severeLowThreshold: 54,
-  highThreshold: 250,
-  urgentHighThreshold: 300,
-  preMealCorrection180: 2,
-  preMealCorrection250: 4,
-  ketonePromptThreshold: 250,
-  insulinStackingHours: 3,
-  alertEmails: ["mom@example.com", "dad@example.com", "tita@example.com"],
-  updatedAt: null
+  childName:             "Amara",
+  rapidInsulin:          "Apidra",
+  basalInsulin:          "Lantus",
+  carbRatio:             8,
+  doseRounding:          1,
+  lowThreshold:          70,
+  highThreshold:         180,
+  urgentHighThreshold:   300,
+  preMealCorrection180:  2,
+  preMealCorrection250:  4,
+  ketonePromptThreshold: 180,
+  insulinStackingHours:  3,
+  alertEmails:           ["mom@example.com","dad@example.com","tita@example.com"],
+  updatedAt:             null
 };
 
+// ── STARTER FOODS (fallback only) ───────────────────────────
 const STARTER_FOODS = [
-  { name:"White rice", category:"Rice, Bread & Grains", portion:"1 cup cooked", carbs:45, calories:205, source:"Family starter", confidence:"Medium", hidden:false },
-  { name:"Pandesal", category:"Rice, Bread & Grains", portion:"1 piece", carbs:15, calories:120, source:"Estimate", confidence:"Low", hidden:false },
-  { name:"Filipino spaghetti", category:"Meals", portion:"1 cup", carbs:43, calories:310, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Adobo sauce", category:"Meals", portion:"2 tbsp", carbs:4, calories:35, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Fried chicken breading", category:"Hidden Carbs", portion:"small serving", carbs:8, calories:60, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Sweet sauce / ketchup", category:"Hidden Carbs", portion:"1 tbsp", carbs:5, calories:20, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Juice box", category:"Drinks", favorite:true, portion:"1 box", carbs:20, calories:90, source:"Label estimate", confidence:"Medium", hidden:false },
-  { name:"Milk", category:"Drinks", portion:"1 cup", carbs:12, calories:150, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Banana", category:"Fruits", portion:"1 medium", carbs:27, calories:105, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Pita bread", category:"Rice, Bread & Grains", portion:"1 medium", carbs:33, calories:170, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Greek yogurt plain", category:"Meals", portion:"170g", carbs:6, calories:100, source:"Generic", confidence:"Medium", hidden:false },
-  { name:"Honey", category:"Meals", portion:"1 tbsp", carbs:17, calories:64, source:"Generic", confidence:"Medium", hidden:true },
-  { name:"Spanakopita", category:"Meals", portion:"1 piece", carbs:28, calories:290, source:"Estimate", confidence:"Low", hidden:true },
-  { name:"Souvlaki with pita", category:"Meals", portion:"1 serving", carbs:38, calories:420, source:"Estimate", confidence:"Low", hidden:true }
+  { name:"White rice",         category:"Rice / Bread / Pasta",    portion:"1 cup cooked",  carbs:45, calories:205, source:"Family starter", confidence:"Medium", hidden:false },
+  { name:"Pandesal",           category:"Rice / Bread / Pasta",    portion:"1 piece",       carbs:15, calories:120, source:"Estimate",       confidence:"Low",    hidden:false },
+  { name:"Filipino spaghetti", category:"Meals",                   portion:"1 cup",         carbs:43, calories:310, source:"Estimate",       confidence:"Low",    hidden:true  },
+  { name:"Adobo sauce",        category:"Sauces / Hidden Carbs",   portion:"2 tbsp",        carbs:4,  calories:35,  source:"Estimate",       confidence:"Low",    hidden:true  },
+  { name:"Fried chicken breading", category:"Sauces / Hidden Carbs", portion:"small serving", carbs:8, calories:60, source:"Estimate",      confidence:"Low",    hidden:true  },
+  { name:"Sweet sauce / ketchup",  category:"Sauces / Hidden Carbs", portion:"1 tbsp",      carbs:5,  calories:20,  source:"Estimate",      confidence:"Low",    hidden:true  },
+  { name:"Juice box",          category:"Drinks",  favorite:true,  portion:"1 box",         carbs:20, calories:90,  source:"Label estimate", confidence:"Medium", hidden:false },
+  { name:"Milk",               category:"Drinks",                  portion:"1 cup",         carbs:12, calories:150, source:"Generic",        confidence:"Medium", hidden:false },
+  { name:"Banana",             category:"Fruit",                   portion:"1 medium",      carbs:27, calories:105, source:"Generic",        confidence:"Medium", hidden:false },
+  { name:"Pita bread",         category:"Rice / Bread / Pasta",    portion:"1 medium",      carbs:33, calories:170, source:"Generic",        confidence:"Medium", hidden:false },
+  { name:"Greek yogurt plain", category:"Meal Favorites",          portion:"170g",          carbs:6,  calories:100, source:"Generic",        confidence:"Medium", hidden:false },
+  { name:"Honey",              category:"Sauces / Hidden Carbs",   portion:"1 tbsp",        carbs:17, calories:64,  source:"Generic",        confidence:"Medium", hidden:true  },
+  { name:"Spanakopita",        category:"Meals",                   portion:"1 piece",       carbs:28, calories:290, source:"Estimate",       confidence:"Low",    hidden:true  },
+  { name:"Souvlaki with pita", category:"Meals",                   portion:"1 serving",     carbs:38, calories:420, source:"Estimate",       confidence:"Low",    hidden:true  }
 ];
 
+// ── BADGE DEFINITIONS ────────────────────────────────────────
 const BADGES = [
-  { id:"scarlet-sentinel", section:"The Blood Watch", name:"The Scarlet Sentinel", desc:"You listened before the first bite.", rule:"Log a glucose reading before a meal." },
-  { id:"keeper-drop", section:"The Blood Watch", name:"Keeper of the Drop", desc:"You told the truth. The number became a signal.", rule:"Log any glucose reading honestly." },
-  { id:"stormbreaker", section:"Storm & Flame", name:"Stormbreaker", desc:"You faced the storm instead of hiding from it.", rule:"Complete high sugar safety steps." },
-  { id:"slayer-300", section:"Storm & Flame", name:"The 300 Slayer", desc:"You called for help before the storm got stronger.", rule:"Log glucose 300+ and alert an adult." },
-  { id:"no-stack-oath", section:"Storm & Flame", name:"The No-Stack Oath", desc:"Power is knowing when to wait.", rule:"Avoid correcting again too soon." },
-  { id:"crimson-comeback", section:"The Lowlight", name:"The Crimson Comeback", desc:"You fell low, but you rose again.", rule:"Treat and recheck a low sugar." },
-  { id:"hidden-carb-hunter", section:"Secrets of the Plate", name:"The Hidden Carb Hunter", desc:"You found what the meal tried to hide.", rule:"Use the secret carbs checklist." },
-  { id:"feast-reader", section:"Secrets of the Plate", name:"The Feast Reader", desc:"You read the plate like a secret map.", rule:"Complete a meal calculation." },
-  { id:"family-food-keeper", section:"Secrets of the Plate", name:"The Family Food Keeper", desc:"You saved a food your real life understands.", rule:"Save a custom family food." },
-  { id:"ketone-seer", section:"The Dark Signals", name:"The Ketone Seer", desc:"You read the warning signs.", rule:"Check ketones during a high sugar day." },
-  { id:"truth-keeper", section:"The Dark Signals", name:"The Truth Keeper", desc:"You told the truth, and the Circle can help.", rule:"Log that ketone strips are missing or unavailable." },
-  { id:"caller-circle", section:"The Circle", name:"Caller of the Circle", desc:"You were brave enough to call your guardians.", rule:"Ask Mom, Dad, or Tita for help." },
-  { id:"brave-page", section:"The Written Heart", name:"The Brave Page", desc:"You gave your feelings a place to go.", rule:"Write a Scarlet Entry." },
-  { id:"girl-who-stayed", section:"The Written Heart", name:"The Girl Who Stayed", desc:"Even on a hard day, you remained.", rule:"Write after choosing sad, angry, or scared." },
-  { id:"seven-scarlet-days", section:"The Unstoppable Line", name:"Seven Scarlet Days", desc:"Seven days. Seven proofs that you kept going.", rule:"Use the app for 7 days." },
-  { id:"three-guardians", section:"The Circle", name:"The Three Guardians", desc:"Your Circle has been summoned.", rule:"Alert the Circle during a high-risk moment." },
-  { id:"signal-flame", section:"The Circle", name:"The Signal Flame", desc:"Your call for help became a light in the dark.", rule:"Send any safety alert." },
-  { id:"scarlet-crown", section:"The Unstoppable Line", name:"The Crimson Crown", desc:"A mark for every brave thing you kept doing.", rule:"Reach a major care milestone." },
-  { id:"wall-proof", section:"The Unstoppable Line", name:"The Wall of Proof", desc:"The proof was never perfection. It was staying.", rule:"Unlock several courage badges." },
-  { id:"soft-monster-tamer", section:"The Written Heart", name:"The Soft Monster Tamer", desc:"You named the feeling, so it became less alone.", rule:"Write about a hard feeling." },
-  { id:"moonlit-heart", section:"The Written Heart", name:"The Moonlit Heart", desc:"Even sadness can be held gently.", rule:"Write a Scarlet Entry on a sad day." },
-  { id:"plate-whisperer", section:"Secrets of the Plate", name:"The Plate Whisperer", desc:"You listened to the meal before it surprised you.", rule:"Build a full meal with food and hidden carb check." },
-  { id:"dark-signal-reader", section:"The Dark Signals", name:"The Dark Signal Reader", desc:"You noticed the warning signs before they became louder.", rule:"Log ketones or symptoms during a high sugar moment." }
+  // Safety
+  { id:"scarlet-sentinel",   section:"Safety",         name:"The Scarlet Sentinel",   subtitle:"You checked before the first bite.",           desc:"You listened to the plan before eating. That is what protection looks like.",       rule:"Log a glucose reading before a meal." },
+  { id:"truth-teller",       section:"Safety",         name:"Truth Teller",           subtitle:"The number is data, not identity.",             desc:"You saved the number even when it was hard. That takes real courage.",              rule:"Save any glucose reading honestly." },
+  { id:"stormbreaker",       section:"Safety",         name:"Stormbreaker",           subtitle:"You faced the storm instead of hiding.",         desc:"You went through every safety step during a high sugar moment.",                   rule:"Complete high sugar safety steps." },
+  { id:"slayer-300",         section:"Safety",         name:"The 300 Slayer",         subtitle:"You called for help before it got worse.",       desc:"Logging a very high reading and asking for help is one of the bravest things.",    rule:"Log glucose 300+ and alert an adult." },
+  { id:"no-stack-oath",      section:"Safety",         name:"The No-Stack Oath",      subtitle:"Power is knowing when to wait.",                 desc:"You chose safety over rushing. That is wisdom.",                                   rule:"Avoid correcting again too soon." },
+  { id:"crimson-comeback",   section:"Safety",         name:"Crimson Comeback",       subtitle:"You fell low but rose again.",                   desc:"You treated a low and kept going. That is unstoppable.",                           rule:"Treat and recheck a low sugar." },
+  { id:"sweet-rescue",       section:"Safety",         name:"Sweet Rescue",           subtitle:"Fast sugar when it was needed.",                 desc:"You chose fast sugar when your body needed it most.",                              rule:"Take fast sugar during a low flow." },
+  { id:"safe-choice",        section:"Safety",         name:"Safe Choice",            subtitle:"You chose safety over rushing.",                 desc:"Saving without guessing keeps you protected.",                                     rule:"Save a reading without insulin when unsure." },
+  // Food Confidence
+  { id:"hidden-carb-hunter", section:"Food Confidence", name:"Hidden Carb Hunter",   subtitle:"You found what hides in sauces and breading.",   desc:"The carbs we forget are often the ones that surprise us most. Not you.",           rule:"Use the hidden carb checklist." },
+  { id:"feast-reader",       section:"Food Confidence", name:"The Feast Reader",      subtitle:"You read the plate like a secret map.",          desc:"You completed a full meal calculation. That is real care.",                        rule:"Complete a meal calculation." },
+  { id:"plate-whisperer",    section:"Food Confidence", name:"Plate Whisperer",       subtitle:"You listened to the meal before it surprised you.", desc:"Building a full meal with a hidden carb check is expert-level care.",            rule:"Build a full meal with hidden carb check." },
+  { id:"brave-pause",        section:"Food Confidence", name:"Brave Pause",           subtitle:"You stopped before guessing insulin.",            desc:"Pausing is not weakness. It is wisdom.",                                           rule:"Save meal without insulin when unsure." },
+  // Scarlet Pages (diary)
+  { id:"brave-page",         section:"Scarlet Pages",  name:"The Brave Page",        subtitle:"You gave your feelings a place to go.",          desc:"Writing is how brave people tell their own story.",                                rule:"Write a Scarlet Entry." },
+  { id:"girl-who-stayed",    section:"Scarlet Pages",  name:"The Girl Who Stayed",   subtitle:"Even on a hard day, you remained.",              desc:"Writing after a hard feeling is one of the most powerful things a person can do.", rule:"Write after choosing a hard feeling." },
+  { id:"soft-monster-tamer", section:"Scarlet Pages",  name:"Soft Monster Tamer",    subtitle:"You named the feeling so it got smaller.",       desc:"Feelings named are feelings tamed. You did that.",                                 rule:"Write about a hard feeling." },
+  { id:"moonlit-heart",      section:"Scarlet Pages",  name:"The Moonlit Heart",     subtitle:"Even sadness can be held gently.",               desc:"On a sad day you still wrote. That is quiet strength.",                            rule:"Write a Scarlet Entry on a sad day." },
+  { id:"vault-keeper",       section:"Scarlet Pages",  name:"Vault Keeper",          subtitle:"You came back to your own story.",               desc:"Reading your own pages takes courage. Your story matters.",                        rule:"Read My Scarlet Pages." },
+  // Streaks
+  { id:"signal-flame",       section:"Streaks",        name:"Signal Flame",          subtitle:"Your call for help became a light.",             desc:"Every time you asked for help, you made the right choice.",                        rule:"Send any safety alert." },
+  { id:"caller-circle",      section:"Streaks",        name:"Caller of the Circle",  subtitle:"You were brave enough to call your guardians.",  desc:"Asking for help is not weakness. It is the right call.",                           rule:"Ask Mom, Dad, or Tita for help." },
+  { id:"three-guardians",    section:"Streaks",        name:"The Three Guardians",   subtitle:"Your Circle has been summoned.",                 desc:"You made sure adults knew what was happening. That keeps you safe.",               rule:"Alert the Circle during a high-risk moment." },
+  { id:"seven-scarlet-days", section:"Streaks",        name:"Seven Scarlet Days",    subtitle:"Seven days. Seven proofs that you kept going.",  desc:"Seven days of checking in. That is dedication.",                                   rule:"Use the app for 7 days." },
+  { id:"steady-spark",       section:"Streaks",        name:"Steady Spark",          subtitle:"You showed up again.",                           desc:"Every log is a mark of care. You keep showing up.",                                rule:"Log five or more meal entries." },
+  // Courage
+  { id:"grown-up-signal",    section:"Courage",        name:"Grown-Up Signal",       subtitle:"You made sure an adult knew.",                   desc:"Telling an adult is the bravest and smartest thing you can do.",                   rule:"Alert an adult during a high or low reading." },
+  { id:"not-my-number",      section:"Courage",        name:"Not My Number",         subtitle:"The number is data, not identity.",              desc:"The glucose number tells you what to do. It does not say who you are.",            rule:"Log a high or low reading and keep going." },
+  { id:"ketone-seer",        section:"Courage",        name:"The Ketone Seer",       subtitle:"You read the warning signs.",                    desc:"Checking ketones takes courage. You did it anyway.",                               rule:"Check ketones during a high sugar day." },
+  { id:"truth-keeper",       section:"Courage",        name:"The Truth Keeper",      subtitle:"You told the truth and kept yourself safe.",     desc:"Honesty about missing strips means an adult can help. That is wisdom.",            rule:"Log that ketone strips are missing or unavailable." },
+  { id:"wall-proof",         section:"Courage",        name:"The Wall of Proof",     subtitle:"The proof was never perfection. It was staying.", desc:"Every badge on this wall is proof that you kept going no matter what.",           rule:"Unlock five or more courage badges." }
 ];
 
+// ── APP STATE ────────────────────────────────────────────────
 let state = {
-  role:null,
-  roleKey:"",
-  authenticated:false,
-  settings: DEFAULT_SETTINGS,
-  foods: STARTER_FOODS,
-  unlockedBadges: new Set(),
-  view:"home",
-  foodTab:"Breakfast Favorites",
-  foodCategory:"All",
-  foodSearch:"",
-  meal:{ type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" },
-  moodCheckedThisSession:false
+  user:            null,
+  role:            null,
+  selectedRole:    "",
+  loginInProgress: false,
+  pendingRepair:   null,
+  settings:        { ...DEFAULT_SETTINGS },
+  foods:           STARTER_FOODS,
+  unlockedBadges:  new Set(),
+  badgeUnlockDates:{},
+  appMode:         "demo",
+  view:            "home",
+  foodCategory:    "All",
+  foodSearch:      "",
+  meal: { type:null, glucose:null, items:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" },
+  highFlow: { glucose:null, ketones:null, symptoms:[], recentApidra:null },
+  lowFlow:  { glucose:null, fastSugar:null, adult:null, recheck:null }
 };
-
-let lastHiddenAt = null;
-let activeTimerInterval = null;
-let audioUnlocked = false;
 
 const $app = document.getElementById("app");
 
+// ── UTILITIES ────────────────────────────────────────────────
 function esc(str){
-  return String(str ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+  return String(str ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 }
 function toast(msg){
   const old = document.querySelector(".toast");
   if(old) old.remove();
   const div = document.createElement("div");
   div.className = "toast";
-  div.setAttribute("role","status");
-  div.setAttribute("aria-live","polite");
   div.textContent = msg;
   document.body.appendChild(div);
-  setTimeout(()=>div.remove(), 3000);
+  setTimeout(() => div.remove(), 3000);
 }
-
-// ── LIVE LISTENER REGISTRY (prevents leaks) ──────
-let activeUnsubs = [];
-function detachListeners(){
-  activeUnsubs.forEach(u => { try{ u(); }catch(e){} });
-  activeUnsubs = [];
-}
-
 function setBusy(btn, text="Saving…"){
   if(!btn) return () => {};
   const original = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = text;
-  return () => {
-    btn.disabled = false;
-    btn.innerHTML = original;
-  };
+  return () => { btn.disabled = false; btn.innerHTML = original; };
+}
+function scrollUp(){ setTimeout(() => window.scrollTo({ top:0, behavior:"smooth" }), 80); }
+function fmtTime(ts){
+  if(!ts) return "";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+}
+function fmtDate(ts){
+  if(!ts) return "";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString([], { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
 }
 
-function scrollToTopSoon(){
-  setTimeout(() => window.scrollTo({ top:0, behavior:"smooth" }), 80);
-}
-
-function unlockAudio(){
-  audioUnlocked = true;
-  try{
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if(AudioContext && !window.__scarletAudioContext){
-      window.__scarletAudioContext = new AudioContext();
-      if(window.__scarletAudioContext.state === "suspended") window.__scarletAudioContext.resume();
-    }
-  }catch(e){}
-}
-
-function playDiaryChime(){
-  try{
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if(!AudioContext) return;
-    const ctx = window.__scarletAudioContext || new AudioContext();
-    window.__scarletAudioContext = ctx;
-    if(ctx.state === "suspended") ctx.resume();
-
-    const now = ctx.currentTime;
-    [523.25, 659.25, 783.99].forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, now + idx * 0.16);
-      gain.gain.setValueAtTime(0.0001, now + idx * 0.16);
-      gain.gain.exponentialRampToValueAtTime(0.16, now + idx * 0.16 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.16 + 0.42);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + idx * 0.16);
-      osc.stop(now + idx * 0.16 + 0.45);
-    });
-  }catch(err){
-    console.warn("Chime unavailable:", err);
-  }
-}
-
-function inTimeWindow(now, start, end){
-  const [sh, sm] = String(start || "00:00").split(":").map(Number);
-  const [eh, em] = String(end || "23:59").split(":").map(Number);
-  const current = now.getHours() * 60 + now.getMinutes();
-  const s = sh * 60 + (sm || 0);
-  const e = eh * 60 + (em || 0);
-  if(s <= e) return current >= s && current <= e;
-  return current >= s || current <= e;
-}
-
-function getLantusPeriod(){
-  const now = new Date();
-  if(inTimeWindow(now, state.settings.lantusMorningStart, state.settings.lantusMorningEnd)) return "morning";
-  if(inTimeWindow(now, state.settings.lantusNightStart, state.settings.lantusNightEnd)) return "night";
-  return now.getHours() < 12 ? "morning_outside_window" : "night_outside_window";
-}
-
-function maybeStartChildMoodCheck(reason="open"){
-  if(state.role !== "child") return false;
-  if(state.view === "mood") return false;
-  const now = Date.now();
-  const lastMoodAt = Number(sessionStorage.getItem("scarletLastMoodAt") || 0);
-  const dueByResume = reason === "resume" && (!lastMoodAt || now - lastMoodAt > 10 * 60 * 1000);
-  const dueByOpen = reason === "open" && !state.moodCheckedThisSession;
-  if(dueByOpen || dueByResume){
-    state.view = "mood";
-    render();
-    return true;
-  }
-  return false;
-}
-
-function returnToDashboard(){
-  state.view = "home";
-  render();
-}
-
-
-function renderFlowDone({title="Saved", message="", next=[]} = {}){
-  layout(`
-    <div class="card success">
-      <h2>${esc(title)}</h2>
-      <p class="muted" style="margin-top:8px">${esc(message)}</p>
-    </div>
-    <div class="grid single">
-      ${next.map(n => `<button class="action ${n.className || ""}" data-next="${n.view}"><strong>${esc(n.title)}</strong><span>${esc(n.sub || "")}</span></button>`).join("")}
-      <button class="action scarlet" data-next="home"><strong>Back Home</strong><span>Return to Amara’s home screen.</span></button>
-    </div>
-  `, "home");
-  document.querySelectorAll("[data-next]").forEach(btn => btn.onclick = () => {
-    state.view = btn.dataset.next;
-    render();
-  });
-}
-
-// ── ROLE HELPERS ─────────────────────────────────
-function roleType(roleKey){
-  return roleKey === "amara" ? "child" : "adult";
-}
-
-// ── RENDER ENTRY POINT ───────────────────────────
+// ── ROUTER ───────────────────────────────────────────────────
 function render(){
-  if(!state.authenticated) return renderLogin();
+  if(!state.user) return renderLogin();
   if(state.role === "adult") return renderAdult();
   switch(state.view){
     case "meal":    return renderMealStart();
     case "high":    return renderHighSugar();
     case "low":     return renderLowSugar();
-    case "lantus":  return renderLantusLog();
-    case "insulin": return renderLantusLog();
+    case "insulin": return renderInsulinLog();
     case "feel":    return renderSymptoms();
     case "diary":   return renderDiary();
     case "vault":   return renderVault();
     case "circle":  return renderCircle();
-    case "foods":   return renderFoodLibrary();
-    case "mood":    return renderHowIFeel();
+    case "mood":    return renderMoodMirror();
     case "reports": return renderReports();
     case "pages":   return renderScarletPages();
     default:        return renderHome();
   }
 }
 
-// ── LOGIN SCREEN ─────────────────────────────────
+// ── LOGIN ────────────────────────────────────────────────────
 function renderLogin(){
   $app.innerHTML = `
     <section class="screen center">
       <div class="app-wrapper">
-
         <div class="header">
           <div class="scarlet-drop"></div>
           <div class="app-title">The Scarlet <span>Diaries</span></div>
@@ -348,266 +178,244 @@ function renderLogin(){
           <div class="tagline">Every drop. Every breath. Unstoppable.</div>
           <div class="build-tag">${BUILD}</div>
         </div>
-
-        <div class="login-card" id="loginCard">
-
-          <!-- STEP 1: ROLE SELECTION -->
-          <div id="roleStep">
+        <div class="login-card">
+          <div id="roleSelection">
             <div class="login-prompt">Who are you?</div>
             <div class="role-buttons">
-              <button class="role-btn amara" data-role="amara">
-                <span class="role-icon">🩸</span>
-                <span>I am Amara</span>
-              </button>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <button class="role-btn circle" data-role="mom"><span class="role-icon">🌙</span> Mom</button>
-                <button class="role-btn circle" data-role="dad"><span class="role-icon">⚡</span> Dad</button>
-              </div>
-              <button class="role-btn circle" data-role="tita">
-                <span class="role-icon">🔮</span>
-                <span>I am Tita</span>
-              </button>
+              <button class="role-btn amara" data-role="amara"><span class="role-icon">🩸</span> I am Amara</button>
+              <button class="role-btn circle" data-role="mom"><span class="role-icon">🌙</span> I am Mom</button>
+              <button class="role-btn circle" data-role="dad"><span class="role-icon">⚡</span> I am Dad</button>
+              <button class="role-btn circle" data-role="tita"><span class="role-icon">🔮</span> I am Tita</button>
             </div>
           </div>
-
-          <!-- STEP 2: PASSCODE -->
-          <div id="passcodeStep" style="display:none">
-            <div class="form-title" id="passcodeTitle">Enter your code</div>
-            <div class="error-msg" id="passcodeError"></div>
-            <div style="position:relative;margin:8px 0">
-              <input
-                type="password"
-                class="form-input"
-                id="passcodeInput"
-                placeholder="Your personal code"
-                autocomplete="current-password"
-                style="padding-right:48px"
-              />
-              <button id="togglePasscode" aria-label="Show or hide passcode" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ash);font-size:18px;cursor:pointer;padding:4px">👁</button>
-            </div>
-            <button class="submit-btn" id="passcodeBtn">
-              <span>🗝</span>
-              <span>Unlock the Diary</span>
-            </button>
-            <button class="back-btn" id="backToRoles" style="margin-top:12px">← Choose a different role</button>
+          <div class="auth-form" id="authForm">
+            <div class="form-title" id="formTitle">Enter Your Details</div>
+            <div class="error-msg" id="errorMsg"></div>
+            <input type="email" class="form-input" id="emailInput" placeholder="Email address" autocomplete="email" />
+            <input type="password" class="form-input" id="passwordInput" placeholder="Password" autocomplete="current-password" />
+            <button class="submit-btn" id="loginBtn"><span>🗝</span> Unlock the Diary</button>
+            <button class="back-btn" id="backBtn">← Choose a different role</button>
+            <button class="create-small" id="createBtn">Create account</button>
+            <p class="small muted" style="text-align:center;margin-top:2px">Already created? Use Unlock the Diary above.</p>
           </div>
-
-          <!-- STEP 3: CHANGE PIN (from settings) -->
-          <div id="changePinStep" style="display:none">
-            <div class="form-title">Change Your Code</div>
-            <div class="error-msg" id="changePinError"></div>
-            <input type="password" class="form-input" id="currentPin" placeholder="Current code" autocomplete="current-password" style="margin-bottom:10px" />
-            <input type="password" class="form-input" id="newPin" placeholder="New code" autocomplete="new-password" style="margin-bottom:10px" />
-            <input type="password" class="form-input" id="confirmPin" placeholder="Confirm new code" autocomplete="new-password" style="margin-bottom:10px" />
-            <button class="submit-btn" id="savePinBtn">Save New Code</button>
-            <button class="back-btn" id="cancelChangePin" style="margin-top:10px">← Cancel</button>
-          </div>
-
         </div>
-
         <div class="footer">The Scarlet Diaries · Private &amp; Protected</div>
       </div>
-    </section>
-  `;
+    </section>`;
 
-  // Role selection
   document.querySelectorAll("[data-role]").forEach(btn => btn.onclick = () => {
-    state.roleKey = btn.dataset.role;
-    document.getElementById("roleStep").style.display = "none";
-    document.getElementById("passcodeStep").style.display = "block";
-    const labels = { amara:"🩸 Hello Amara", mom:"🌙 Hello Mom", dad:"⚡ Hello Dad", tita:"🔮 Hello Tita" };
-    document.getElementById("passcodeTitle").textContent = labels[state.roleKey] || "Enter your code";
-    document.getElementById("passcodeInput").focus();
-    clearPasscodeError();
+    state.selectedRole = btn.dataset.role;
+    document.getElementById("roleSelection").style.display = "none";
+    document.getElementById("authForm").classList.add("visible");
+    document.getElementById("formTitle").textContent = roleTitle(state.selectedRole);
+    hideError();
   });
-
-  // Back to role selection
-  document.getElementById("backToRoles").onclick = () => {
-    state.roleKey = "";
-    document.getElementById("roleStep").style.display = "block";
-    document.getElementById("passcodeStep").style.display = "none";
-    document.getElementById("passcodeInput").value = "";
-    clearPasscodeError();
+  document.getElementById("backBtn").onclick = () => {
+    state.selectedRole = "";
+    document.getElementById("roleSelection").style.display = "block";
+    document.getElementById("authForm").classList.remove("visible");
+    hideError();
   };
+  document.getElementById("loginBtn").onclick = () => doLogin(false);
+  document.getElementById("createBtn").onclick = () => doLogin(true);
+  document.getElementById("passwordInput").onkeydown = e => { if(e.key === "Enter") doLogin(false); };
+}
+function showError(msg){ const el = document.getElementById("errorMsg"); if(!el) return toast(msg); el.textContent = msg; el.classList.add("visible"); }
+function hideError(){ const el = document.getElementById("errorMsg"); if(el) el.classList.remove("visible"); }
+function roleToStoredRole(r){ return r === "amara" ? "child" : "adult"; }
+function roleTitle(r){ return ({amara:"🩸 Welcome, Amara",mom:"🌙 Welcome, Mom",dad:"⚡ Welcome, Dad",tita:"🔮 Welcome, Tita"})[r] || "Enter Your Details"; }
 
-  // Show/hide passcode
-  document.getElementById("togglePasscode").onclick = () => {
-    const inp = document.getElementById("passcodeInput");
-    inp.type = inp.type === "password" ? "text" : "password";
+// ── PROFILE REPAIR ───────────────────────────────────────────
+function renderProfileRepair(){
+  const repair = state.pendingRepair;
+  if(!repair){ renderLogin(); return; }
+  const roleName = ({amara:"Amara",mom:"Mom",dad:"Dad",tita:"Tita"})[repair.roleKey] || repair.roleKey;
+  $app.innerHTML = `
+    <section class="screen center">
+      <div class="app-wrapper">
+        <div class="header">
+          <div class="scarlet-drop"></div>
+          <div class="app-title">The Scarlet <span>Diaries</span></div>
+          <div class="divider"></div>
+          <div class="tagline">Every drop. Every breath. Unstoppable.</div>
+          <div class="build-tag">${BUILD}</div>
+        </div>
+        <div class="login-card">
+          <div class="form-title">Profile Repair Needed</div>
+          <p class="muted small" style="text-align:center;line-height:1.5">This email can sign in, but it does not yet have a Scarlet profile.</p>
+          <div class="card" style="box-shadow:none">
+            <div class="kv"><span>Email</span><strong>${esc(repair.email)}</strong></div>
+            <div class="kv"><span>Create profile as</span><strong>${esc(roleName)}</strong></div>
+          </div>
+          <button class="submit-btn" id="repairBtn">Create Scarlet Profile</button>
+          <button class="back-btn" id="repairCancel">Cancel and choose another role</button>
+        </div>
+        <div class="footer">The Scarlet Diaries · Private &amp; Protected</div>
+      </div>
+    </section>`;
+
+  document.getElementById("repairCancel").onclick = async () => {
+    state.pendingRepair = null; state.loginInProgress = false;
+    sessionStorage.removeItem("scarletJustLoggedIn");
+    await signOut(auth); renderLogin();
   };
-
-  // Enter key on passcode
-  document.getElementById("passcodeInput").onkeydown = e => {
-    if(e.key === "Enter") attemptLogin();
+  document.getElementById("repairBtn").onclick = async () => {
+    const btn = document.getElementById("repairBtn");
+    const restore = setBusy(btn, "Creating profile…");
+    try{
+      const { user, email, role, roleKey } = state.pendingRepair;
+      await setDoc(doc(db,"users",user.uid),{
+        email, role, roleKey, familyId:FAMILY_ID,
+        displayName: role === "child" ? "Amara" : roleKey,
+        active:true, repairedAt:serverTimestamp(), updatedAt:serverTimestamp()
+      },{ merge:true });
+      toast("Scarlet profile created.");
+      sessionStorage.setItem("scarletJustLoggedIn","yes");
+      state.user = user; state.role = role;
+      state.pendingRepair = null; state.loginInProgress = false;
+      localStorage.setItem("scarletRole", role);
+      localStorage.setItem("scarletRoleKey", roleKey);
+      await safeEnsureDefaults(); await loadData(); render();
+    }catch(err){
+      console.error(err);
+      toast(String(err.message||"").toLowerCase().includes("permission")
+        ? "Profile repair blocked. Please publish the firestore.rules file."
+        : "Could not repair profile yet. Please try again.");
+    }finally{ restore(); }
   };
-
-  // Unlock button
-  document.getElementById("passcodeBtn").onclick = () => attemptLogin();
 }
 
-function clearPasscodeError(){
-  const el = document.getElementById("passcodeError");
-  if(el){ el.textContent = ""; el.classList.remove("visible"); }
-}
-function showPasscodeError(msg){
-  const el = document.getElementById("passcodeError");
-  if(!el) return toast(msg);
-  el.textContent = msg;
-  el.classList.add("visible");
-}
+// ── DO LOGIN ─────────────────────────────────────────────────
+async function doLogin(create=false){
+  const email   = document.getElementById("emailInput").value.trim();
+  const pass    = document.getElementById("passwordInput").value;
+  const roleKey = state.selectedRole || "amara";
+  const role    = roleToStoredRole(roleKey);
+  if(!email || !pass) return showError("Please enter your email and password.");
 
-async function attemptLogin(){
-  const code = document.getElementById("passcodeInput")?.value?.trim();
-  const roleKey = state.roleKey;
-  if(!code) return showPasscodeError("Please enter your code.");
-  if(!roleKey) return showPasscodeError("Please select your role first.");
+  const btn = create ? document.getElementById("createBtn") : document.getElementById("loginBtn");
+  const originalText = btn ? btn.innerHTML : "";
+  try{
+    state.loginInProgress = true;
+    if(btn){ btn.disabled = true; btn.innerHTML = create ? "Creating account…" : "Unlocking…"; }
+    hideError();
+    const cred = create
+      ? await createUserWithEmailAndPassword(auth, email, pass)
+      : await signInWithEmailAndPassword(auth, email, pass);
 
-  const btn = document.getElementById("passcodeBtn");
-  const restore = setBusy(btn, "Checking…");
-  clearPasscodeError();
+    const userRef  = doc(db,"users",cred.user.uid);
+    let userSnap   = await getDoc(userRef);
 
-  try {
-    await ensureFirebaseAuth();
-    // First time: seed passcodes if not yet in Firestore
-    await ensurePasscodes();
-
-    const valid = await verifyPasscode(roleKey, code);
-    if(!valid){
-      restore();
-      showPasscodeError("That code is not right. Please try again.");
-      document.getElementById("passcodeInput").value = "";
-      document.getElementById("passcodeInput").focus();
-      return;
+    if(create){
+      await setDoc(userRef,{
+        email, role, roleKey, familyId:FAMILY_ID,
+        displayName: role === "child" ? "Amara" : roleKey,
+        active:true, createdAt:serverTimestamp(), updatedAt:serverTimestamp()
+      },{ merge:true });
+      userSnap = await getDoc(userRef);
+      toast("Account created. Unlocking diary…");
     }
 
-    // Authenticated
-    state.authenticated = true;
-    state.roleKey = roleKey;
-    state.role = roleType(roleKey);
+    if(!userSnap.exists()){
+      state.pendingRepair = { user:cred.user, email, role, roleKey };
+      if(btn){ btn.disabled = false; btn.innerHTML = originalText; }
+      renderProfileRepair(); return;
+    }
+
+    const profile = userSnap.data();
+    if(profile.roleKey !== roleKey || profile.role !== role){
+      await signOut(auth); state.loginInProgress = false;
+      return showError("This account is not assigned to this profile. Please choose the correct profile.");
+    }
+    if(profile.active === false){
+      await signOut(auth); state.loginInProgress = false;
+      return showError("This account is not active. Please ask an adult to check it.");
+    }
+
+    sessionStorage.setItem("scarletJustLoggedIn","yes");
+    state.user = cred.user; state.role = role; state.loginInProgress = false;
+    localStorage.setItem("scarletRole", role);
     localStorage.setItem("scarletRoleKey", roleKey);
-    localStorage.setItem("scarletRole", state.role);
+    await safeEnsureDefaults(); await loadData(); render();
 
-    await safeEnsureDefaults();
-    await loadData();
-    state.moodCheckedThisSession = false;
-    if(!maybeStartChildMoodCheck("open")) render();
-
-  } catch(err){
-    console.error("Login error:", err);
-    restore();
-    if(String(err.message||"").toLowerCase().includes("permission")){
-      showPasscodeError("Firebase rules need to be published. Please update firestore.rules first.");
-    } else {
-      showPasscodeError("Something went wrong. Please try again.");
-    }
+  }catch(err){
+    console.error(err); state.loginInProgress = false;
+    if(err.code === "auth/invalid-email")                showError("Please enter a valid email address.");
+    else if(err.code === "auth/email-already-in-use")    showError("This email already has an account. Use Unlock the Diary instead.");
+    else if(err.code === "auth/weak-password")           showError("Please use a stronger password.");
+    else if(err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") showError("Incorrect email or password. Try again.");
+    else if(String(err.message||"").toLowerCase().includes("permission")) showError("Firebase permissions blocked setup. Please publish the firestore.rules file, then try again.");
+    else showError(err.message || "Something went wrong. Please try again.");
+  }finally{
+    if(!state.pendingRepair && btn){ btn.disabled = false; btn.innerHTML = originalText; }
   }
 }
 
-// ── CHANGE PIN ────────────────────────────────────
-async function showChangePin(){
-  // Show change pin step inside login card
-  const card = document.getElementById("loginCard");
-  if(!card) return;
-  document.getElementById("roleStep") && (document.getElementById("roleStep").style.display = "none");
-  document.getElementById("passcodeStep") && (document.getElementById("passcodeStep").style.display = "none");
-  document.getElementById("changePinStep").style.display = "block";
-
-  document.getElementById("savePinBtn").onclick = async () => {
-    const current = document.getElementById("currentPin").value.trim();
-    const newP = document.getElementById("newPin").value.trim();
-    const confirm = document.getElementById("confirmPin").value.trim();
-    const errEl = document.getElementById("changePinError");
-
-    const showErr = msg => { errEl.textContent = msg; errEl.classList.add("visible"); };
-    errEl.classList.remove("visible");
-
-    if(!current) return showErr("Please enter your current code.");
-    if(!newP || newP.length < 4) return showErr("New code must be at least 4 characters.");
-    if(newP !== confirm) return showErr("New codes do not match.");
-
-    const btn = document.getElementById("savePinBtn");
-    const restore = setBusy(btn, "Saving…");
-
-    const valid = await verifyPasscode(state.roleKey, current);
-    if(!valid){ restore(); return showErr("Current code is incorrect."); }
-
-    await savePasscode(state.roleKey, newP);
-    restore();
-    toast("Your code has been updated.");
-    render();
-  };
-
-  document.getElementById("cancelChangePin").onclick = () => render();
-}
-
-// ── LOGOUT ────────────────────────────────────────
-function logout(){
-  detachListeners();
-  state.authenticated = false;
-  state.role = null;
-  state.roleKey = "";
-  localStorage.removeItem("scarletRole");
-  localStorage.removeItem("scarletRoleKey");
-  renderLogin();
-}
-
-// ── ENSURE DEFAULTS ───────────────────────────────
+// ── ENSURE DEFAULTS ──────────────────────────────────────────
 async function safeEnsureDefaults(){
   try{ await ensureDefaults(); }
-  catch(err){ console.warn("Starter setup skipped:", err); }
+  catch(err){ console.warn("Starter setup skipped or blocked:", err); }
 }
-
 async function ensureDefaults(){
   const settingsRef = doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current");
   const snap = await getDoc(settingsRef);
-  if(!snap.exists()) await setDoc(settingsRef, { ...DEFAULT_SETTINGS, updatedAt: serverTimestamp() });
+  if(!snap.exists()) await setDoc(settingsRef,{ ...DEFAULT_SETTINGS, updatedAt:serverTimestamp() });
 
   const foodCheck = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), limit(1)));
   if(foodCheck.empty){
     for(const food of STARTER_FOODS){
       const foodId = food.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
-      await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",foodId), {
-        ...food, familyId:FAMILY_ID, verified: food.source === "Family starter",
-        favorite: !!food.favorite, active:true, updatedAt: serverTimestamp()
-      }, { merge:true });
+      await setDoc(doc(db,"families",FAMILY_ID,"foodLibrary",foodId),{
+        ...food, familyId:FAMILY_ID, verified:food.source==="Family starter", favorite:!!food.favorite, active:true, updatedAt:serverTimestamp()
+      },{ merge:true });
     }
   }
-
   const badgeCheck = await getDocs(query(collection(db,"families",FAMILY_ID,"badges"), limit(1)));
   if(badgeCheck.empty){
     for(const badge of BADGES) await setDoc(doc(db,"families",FAMILY_ID,"badges",badge.id), badge, { merge:true });
   }
 }
 
-// ── LOAD DATA ─────────────────────────────────────
+// ── LOAD DATA ────────────────────────────────────────────────
 async function loadData(){
   try{
     const settingsSnap = await getDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"));
     if(settingsSnap.exists()) state.settings = { ...DEFAULT_SETTINGS, ...settingsSnap.data() };
+
     try{
       const localFoods = await fetch("./foods.json").then(r => r.ok ? r.json() : []);
       if(Array.isArray(localFoods) && localFoods.length) state.foods = localFoods.map(f => ({ active:true, verified:true, ...f }));
-    }catch(e){ state.foods = STARTER_FOODS; }
+    }catch(e){ console.warn("Local foods.json unavailable, using starter foods.", e); state.foods = STARTER_FOODS; }
+
     try{
-      const foodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
-      if(!foodsSnap.empty){
-        const firestoreFoods = foodsSnap.docs.map(d => ({ id:d.id, ...d.data() }));
-        const map = new Map(state.foods.map(f => [f.id || f.name, f]));
-        firestoreFoods.forEach(f => map.set(f.id || f.name, f));
-        state.foods = Array.from(map.values());
+      const firestoreFoodsSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"foodLibrary"), where("active","==",true), limit(120)));
+      if(!firestoreFoodsSnap.empty){
+        const ffMap = new Map(state.foods.map(f => [f.id||f.name, f]));
+        firestoreFoodsSnap.docs.forEach(d => ffMap.set(d.id||d.data().name, { id:d.id, ...d.data() }));
+        state.foods = Array.from(ffMap.values());
       }
-    }catch(e){ console.warn("Firestore foods unavailable.", e); }
+    }catch(e){ console.warn("Firestore food library unavailable; using local foods.json.", e); }
+
     try{
       const unlockSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
       state.unlockedBadges = new Set(unlockSnap.docs.map(d => d.id));
-    }catch(e){ state.unlockedBadges = new Set(); }
+      state.badgeUnlockDates = {};
+      unlockSnap.docs.forEach(d => {
+        const dat = d.data();
+        if(dat.createdAt) state.badgeUnlockDates[d.id] = dat.createdAt;
+      });
+    }catch(e){ console.warn("Badge unlocks unavailable yet.", e); state.unlockedBadges = new Set(); }
+
+    try{
+      const appModeSnap = await getDoc(doc(db,"families",FAMILY_ID,"settings","appMode"));
+      if(appModeSnap.exists()) state.appMode = appModeSnap.data().mode || "demo";
+    }catch(e){ state.appMode = "demo"; }
+
   }catch(err){ console.warn("Data load issue:", err); }
 }
 
-// ── LAYOUT ────────────────────────────────────────
+// ── LAYOUT WRAPPER (child views) ──────────────────────────────
 function layout(content, active="home"){
-  const hour = new Date().getHours();
-  document.body.classList.toggle("night-theme", hour >= 19 || hour < 6);
   $app.innerHTML = `
     <div class="screen">
       <div class="topbar">
@@ -620,138 +428,87 @@ function layout(content, active="home"){
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="build-tag">${BUILD}</span>
-          <button class="btn secondary" id="logoutBtn">Exit</button>
+          <button class="btn secondary" data-action="logout">Exit</button>
         </div>
       </div>
       ${content}
-      <nav class="nav" aria-label="Main navigation">
-        <button class="${active==="home"?"active":""}" ${active==="home"?'aria-current="page"':''} data-view="home">Home</button>
-        <button class="${active==="meal"?"active":""}" ${active==="meal"?'aria-current="page"':''} data-view="meal">Meal</button>
-        <button class="${active==="foods"?"active":""}" ${active==="foods"?'aria-current="page"':''} data-view="foods">Foods</button>
-        <button class="${active==="diary"?"active":""}" ${active==="diary"?'aria-current="page"':''} data-view="diary">Entry</button>
-        <button class="${active==="vault"?"active":""}" ${active==="vault"?'aria-current="page"':''} data-view="vault">Vault</button>
-        <button class="${active==="reports"?"active":""}" ${active==="reports"?'aria-current="page"':''} data-view="reports">Reports</button>
+      <nav class="nav">
+        <button class="${active==="home"?"active":""}" data-view="home">Home</button>
+        <button class="${active==="meal"?"active":""}" data-view="meal">Meal</button>
+        <button class="${active==="diary"?"active":""}" data-view="diary">Entry</button>
+        <button class="${active==="vault"?"active":""}" data-view="vault">Vault</button>
+        <button class="${active==="reports"?"active":""}" data-view="reports">Reports</button>
       </nav>
-    </div>
-  `;
+    </div>`;
   bindGlobal();
 }
-
 function bindGlobal(){
   document.querySelectorAll("button").forEach(btn => {
     if(btn.dataset.tapBound) return;
     btn.dataset.tapBound = "1";
     btn.addEventListener("pointerdown", () => btn.classList.add("is-pressed"));
-    btn.addEventListener("pointerup", () => setTimeout(()=>btn.classList.remove("is-pressed"),120));
-    btn.addEventListener("pointerleave", () => btn.classList.remove("is-pressed"));
+    btn.addEventListener("pointerup",   () => setTimeout(() => btn.classList.remove("is-pressed"), 120));
+    btn.addEventListener("pointerleave",() => btn.classList.remove("is-pressed"));
   });
   document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => { state.view = btn.dataset.view; render(); });
-  const logoutBtn = document.getElementById("logoutBtn");
-  if(logoutBtn) logoutBtn.onclick = () => logout();
-  document.querySelectorAll('[data-action="logout"]').forEach(btn => btn.onclick = () => logout());
+  const logoutBtn = document.querySelector("[data-action='logout']");
+  if(logoutBtn) logoutBtn.onclick = () => signOut(auth);
 }
 
-
-function renderHome(){
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+// ── FLOW DONE ────────────────────────────────────────────────
+function renderFlowDone({ title="Saved", message="", next=[] } = {}){
   layout(`
-    <div class="card dark" style="padding:22px 20px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-        <div class="scarlet-drop" style="width:34px;height:34px;margin-bottom:0;flex-shrink:0"></div>
-        <div>
-          <p class="small" style="color:var(--ash);letter-spacing:1px;text-transform:uppercase;font-size:10px">${greeting}</p>
-          <h2 class="hello-title" style="font-size:24px">Hello, Amara.</h2>
-        </div>
-      </div>
-      <p class="tagline" style="text-align:left;font-size:11px;letter-spacing:2.5px">What do you need now?</p>
-      <div class="divider-line" style="margin-top:14px"></div>
-      <p class="small" style="color:var(--ash);line-height:1.6;margin-top:10px">Apidra and Lantus are separate. If you are unsure, ask Mom, Dad, or Tita.</p>
+    <div class="card success">
+      <h2>${esc(title)}</h2>
+      <p class="muted" style="margin-top:8px">${esc(message)}</p>
     </div>
-
-    <p class="small section-label">Safety</p>
-    <div class="grid">
-      <button class="action action-meal" data-go="meal" style="grid-column:1/-1;min-height:82px">
-        <strong style="font-size:17px">Before I Eat</strong>
-        <span>Choose meal · Check sugar · Add food · Adult checks dose</span>
-      </button>
-      <button class="action action-low" data-go="low">
-        <strong>My Sugar Is Low</strong>
-        <span>No insulin now. Help your body first.</span>
-      </button>
-      <button class="action action-high" data-go="high">
-        <strong>My Sugar Is High</strong>
-        <span>Check active Apidra before any correction.</span>
-      </button>
-      <button class="action action-lantus" data-go="lantus">
-        <strong>My Lantus</strong>
-        <span>Long-acting insulin only.</span>
-      </button>
-      <button class="action" data-go="feel">
-        <strong>I Don’t Feel Well</strong>
-        <span>Tell the diary what your body feels.</span>
-      </button>
-    </div>
-
-    <p class="small section-label">Your Diary</p>
-    <div class="grid">
-      <button class="action action-diary" data-go="diary" style="grid-column:1/-1">
-        <strong>Scarlet Entry</strong>
-        <span>Write what you want to remember, release, or say.</span>
-      </button>
-      <button class="action action-diary" data-go="pages">
-        <strong>Scarlet Pages</strong>
-        <span>Your saved entries.</span>
-      </button>
-      <button class="action action-vault" data-go="vault">
-        <strong>The Scarlet Vault</strong>
-        <span>Your courage marks and badges.</span>
-      </button>
-    </div>
-
-    <p class="small section-label">More</p>
-    <div class="grid">
-      <button class="action" data-go="foods">
-        <strong>Food Library</strong>
-        <span>Favorites, portions, and saved foods.</span>
-      </button>
-      <button class="action" data-go="mood">
-        <strong>How I Feel</strong>
-        <span>Check in without shame.</span>
-      </button>
-      <button class="action" data-go="reports">
-        <strong>Reports</strong>
-        <span>7 and 14-day summaries.</span>
-      </button>
-      <button class="action" data-go="circle">
-        <strong>Call My Circle</strong>
-        <span>Mom · Dad · Tita</span>
-      </button>
-    </div>
-
-    <div class="card" style="padding:14px;background:rgba(122,0,18,0.06)">
-      <p class="small" style="color:var(--ash);line-height:1.6">Badges, Scarlet Entry, Scarlet Pages, food library, reports, and safety alerts are preserved in this integrated build.</p>
-    </div>
-  `, "home");
-  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { unlockAudio(); state.view = b.dataset.go; render(); });
+    <div class="grid single">
+      ${next.map(n => `<button class="action ${n.className||""}" data-next="${n.view}"><strong>${esc(n.title)}</strong><span>${esc(n.sub||"")}</span></button>`).join("")}
+      <button class="action scarlet" data-next="home"><strong>Back Home</strong><span>Return to Amara's home screen.</span></button>
+    </div>`, "home");
+  document.querySelectorAll("[data-next]").forEach(btn => btn.onclick = () => { state.view = btn.dataset.next; render(); });
 }
 
+// ── HOME ─────────────────────────────────────────────────────
+function renderHome(){
+  layout(`
+    <div class="card dark">
+      <p class="pill">Amara's private safety diary</p>
+      <h2 class="hello-title" style="margin-top:12px">Hello, Amara.</h2>
+      <p class="tagline" style="text-align:left;margin-top:4px">What does your body need?</p>
+    </div>
+    <div class="card">
+      <h3>Safety first</h3>
+      <p class="muted small">This app gives an estimate from the saved family plan. It must never be treated as an order to inject. If unsure, call the Circle.</p>
+    </div>
+    <div class="grid">
+      <button class="action scarlet" data-go="meal"><strong>Before I Eat</strong><span>Check sugar, choose food, then see a suggested dose.</span></button>
+      <button class="action" data-go="high"><strong>My Sugar Is High</strong><span>Slow down, check safety, alert the Circle.</span></button>
+      <button class="action" data-go="low"><strong>My Sugar Is Low</strong><span>No insulin now. Protect yourself first.</span></button>
+      <button class="action" data-go="insulin"><strong>I Took Insulin</strong><span>Log Apidra or Lantus.</span></button>
+      <button class="action" data-go="feel"><strong>I Don't Feel Well</strong><span>Tell the diary what your body feels.</span></button>
+      <button class="action plum" data-go="diary"><strong>Write a Scarlet Entry</strong><span>Give your feelings a place to go.</span></button>
+      <button class="action plum" data-go="pages"><strong>My Scarlet Pages</strong><span>Reread the words that prove you kept going.</span></button>
+      <button class="action plum" data-go="vault"><strong>Open The Scarlet Vault</strong><span>Proof that you kept going.</span></button>
+      <button class="action" data-go="mood"><strong>Mood Mirror</strong><span>See feelings without shame.</span></button>
+      <button class="action" data-go="circle"><strong>Call My Circle</strong><span>Mom, Dad, Tita.</span></button>
+    </div>`, "home");
+  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { state.view = b.dataset.go; render(); });
+}
 
+// ── MEAL FLOW ────────────────────────────────────────────────
 function renderMealStart(){
-  state.meal = { type:null, glucose:null, items:[], hiddenChecked:false, symptoms:[], ketones:null, lastApidra:"unknown" };
+  state.meal = { type:null, glucose:null, items:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" };
   layout(`
     <div class="card">
-      <button class="btn secondary" id="backFromMealStart" style="margin-bottom:12px">← Back Home</button>
       <h2>Before I Eat</h2>
-      <p class="muted">First, choose the meal. Then we check sugar, add food, and show the Apidra estimate on its own page.</p>
+      <p class="muted">First, choose what you're having.</p>
     </div>
     <div class="grid">
-      ${["Breakfast","Lunch","Dinner","Snack"].map(m => `
-        <button class="action action-meal" data-meal="${m}"><strong>${m}</strong><span>Start meal safety steps.</span></button>
+      ${["Morning Meal","Midday Meal","Evening Meal","Small Bite"].map(m => `
+        <button class="action" data-meal="${m}"><strong>${m}</strong><span>Start meal safety steps.</span></button>
       `).join("")}
-    </div>
-  `, "meal");
-  document.getElementById("backFromMealStart").onclick = returnToDashboard;
+    </div>`, "meal");
   document.querySelectorAll("[data-meal]").forEach(btn => btn.onclick = () => renderMealGlucose(btn.dataset.meal));
 }
 
@@ -759,105 +516,71 @@ function renderMealGlucose(type){
   state.meal.type = type;
   layout(`
     <div class="card">
-      <button class="btn secondary" id="backToMealType" style="margin-bottom:12px">← Back to meals</button>
       <h2>${esc(type)}</h2>
-      <p class="muted">What is your sugar right now, before eating?</p>
+      <p class="muted">What is your sugar before eating?</p>
       <div class="field">
-        <label>Current sugar mg/dL</label>
+        <label>Pre-meal glucose mg/dL</label>
         <input id="glucose" type="number" inputmode="numeric" placeholder="Example: 145" />
       </div>
-      <button class="btn scarlet full" id="continueMeal">Continue to food</button>
-    </div>
-  `, "meal");
-  document.getElementById("backToMealType").onclick = renderMealStart;
+      <button class="btn scarlet full" id="continueMeal">Continue</button>
+    </div>`, "meal");
   document.getElementById("continueMeal").onclick = () => {
     const g = Number(document.getElementById("glucose").value);
     if(!g || g < 20 || g > 600) return toast("Please enter a valid glucose number.");
     state.meal.glucose = g;
     if(g < state.settings.lowThreshold) return renderLowSugar(g);
     if(g >= state.settings.highThreshold) return renderKetonePrompt("meal");
-    // A correction dose would be added — first check for recent Apidra (stacking risk)
-    if(g > Number(state.settings.targetGlucose || 120)) return renderMealRecentApidra();
     renderFoodBuilder();
   };
-}
-
-function renderMealRecentApidra(){
-  const hours = state.settings.insulinStackingHours || 3;
-  layout(`
-    <div class="card warning">
-      <h2>One quick check</h2>
-      <p class="muted">Your sugar is above target, so a correction may be added. Did you take Apidra in the last ${hours} hours?</p>
-    </div>
-    <div class="grid single">
-      <button class="action" data-recent="no"><strong>No</strong><span>No Apidra in the last ${hours} hours.</span></button>
-      <button class="action" data-recent="yes"><strong>Yes</strong><span>Apidra may still be working. We will skip the auto-correction.</span></button>
-      <button class="action" data-recent="unknown"><strong>I'm not sure</strong><span>We will skip the auto-correction to be safe.</span></button>
-    </div>
-  `, "meal");
-  document.querySelectorAll("[data-recent]").forEach(btn => btn.onclick = () => {
-    state.meal.lastApidra = btn.dataset.recent;
-    renderFoodBuilder();
-  });
 }
 
 function renderKetonePrompt(next="meal"){
   const g = state.meal.glucose;
   layout(`
-    <div class="card ${g>=state.settings.urgentHighThreshold ? "danger":"warning"}">
-      <h2>${g>=state.settings.urgentHighThreshold ? "Very high sugar" : "High sugar"}</h2>
-      <p class="muted">High sugar can leave warning signs. Let’s check if we can.</p>
+    <div class="card ${g>=state.settings.urgentHighThreshold?"danger":"warning"}">
+      <h2>${g>=state.settings.urgentHighThreshold?"Very high sugar":"High sugar before meal"}</h2>
+      <p class="muted">High sugar can leave warning signs. Let's check if we can.</p>
       <div class="divider-line"></div>
       <p><strong>Glucose:</strong> ${g} mg/dL</p>
-      <p class="small muted">Please check ketones if strips are available. Tell your Circle now. If there are no strips, log it honestly so adults can help.</p>
+      <p class="small muted" style="margin-top:6px">Please check ketones if strips are available. Tell your Circle now. If there are no strips, log it honestly so adults can help.</p>
     </div>
     <div class="grid single">
-      ${["I checked — negative","Trace / small","Moderate / large","No strips","I don’t know how","Adult not available"].map(k => `
+      ${["I checked — negative","Trace / small","Moderate / large","No strips","I don't know how","Adult not available"].map(k => `
         <button class="action" data-ketone="${k}"><strong>${k}</strong><span>Save ketone status.</span></button>
       `).join("")}
-    </div>
-  `, "meal");
+    </div>`, "meal");
   document.querySelectorAll("[data-ketone]").forEach(btn => btn.onclick = async () => {
     state.meal.ketones = btn.dataset.ketone;
     await addKetoneLog(g, btn.dataset.ketone);
     if(btn.dataset.ketone === "No strips") await unlockBadge("truth-keeper");
-    if(btn.dataset.ketone.includes("checked")) { await unlockBadge("ketone-seer"); await unlockBadge("dark-signal-reader"); }
-    if(g >= state.settings.urgentHighThreshold) await createAlert("urgent_high", "red", `Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
-    else await createAlert("high", "orange", `Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
+    if(btn.dataset.ketone.includes("checked")){ await unlockBadge("ketone-seer"); }
+    if(g >= state.settings.urgentHighThreshold) await createAlert("urgent_high","red",`Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
+    else await createAlert("high","orange",`Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
     if(btn.dataset.ketone === "Moderate / large") return renderEmergency("Moderate or large ketones need adult help now.");
-    if(next === "meal") renderMealRecentApidra(); else renderHighSugarSafety();
+    if(next === "meal") renderFoodBuilder(); else renderHighSugarSafety();
   });
-}
-
-function foodConfidence(f){
-  if(f.verified || f.source === "Family Verified") return "High confidence";
-  if((f.source || "").includes("Open Food Facts") || (f.source || "").includes("Label")) return "High confidence";
-  if((f.source || "").includes("Generic")) return "Medium confidence";
-  return `${f.confidence || "Low"} confidence`;
 }
 
 function renderFoodBuilder(){
   const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs","Search","Add Food"];
-  const foodCarbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
-  const hasFood = state.meal.items.length > 0;
-  const itemsHtml = state.meal.items.map((it,i)=>`
+  const foodCarbs  = state.meal.items.reduce((s,x) => s + Number(x.carbs||0), 0);
+  const hasFood    = state.meal.items.length > 0;
+
+  const itemsHtml = state.meal.items.map((it,i) => `
     <div class="list-item meal-item">
       <div>
         <strong>${esc(it.name)}</strong>
         <span class="small muted">${esc(it.portion)} · ${it.carbs}g carbs</span>
-        <div class="confidence">${esc(it.source || "Food list")}</div>
       </div>
       <button class="btn secondary" data-remove="${i}">Remove</button>
-    </div>
-  `).join("") || `<p class="muted small">No food added yet. Choose food below.</p>`;
+    </div>`).join("") || `<p class="muted small">No food added yet. Choose food below.</p>`;
 
   layout(`
     <div class="card dark">
       <h2>Choose Food</h2>
       <p class="tagline" style="text-align:left;margin-top:6px">Tap what is on your plate.</p>
     </div>
-
-    <div class="card meal-summary-sticky" id="mealSoFar">
+    <div class="card" id="mealSoFar">
       <h3>Meal so far</h3>
       <div class="list">${itemsHtml}</div>
       <div class="divider-line"></div>
@@ -866,120 +589,79 @@ function renderFoodBuilder(){
         <div class="btn-row" style="margin-top:10px">
           <button class="btn scarlet" id="goHidden">Continue</button>
           <button class="btn secondary" id="skipHidden">No hidden carbs</button>
-        </div>
-      ` : `<p class="muted small" style="margin-top:10px">Add food first. The hidden-carb check comes after food is added.</p>`}
+        </div>` : `<p class="muted small" style="margin-top:10px">Add food first. The hidden-carb check comes after food is added.</p>`}
     </div>
-
-    <div class="card" id="foodGroupsCard">
+    <div class="card">
       <h3>Choose a food group</h3>
       <div class="food-category-grid">
-        ${categories.map(c => `<button class="food-chip ${state.foodCategory===c ? "active":""}" data-food-cat="${c}">${c}</button>`).join("")}
+        ${categories.map(c => `<button class="food-chip ${state.foodCategory===c?"active":""}" data-food-cat="${c}">${c}</button>`).join("")}
       </div>
       <div class="field">
         <label>Search food by name or first letters</label>
-        <input id="foodSearch" value="${esc(state.foodSearch || "")}" placeholder="Try r, rice, milk, pita…" />
+        <input id="foodSearch" value="${esc(state.foodSearch||"")}" placeholder="Try r, rice, milk, pita…" />
       </div>
       <div id="foodResults" class="list food-results"></div>
-    </div>
-  `, "meal");
+    </div>`, "meal");
 
   document.querySelectorAll("[data-food-cat]").forEach(btn => btn.onclick = () => {
-    btn.classList.add("selected-flash");
     state.foodCategory = btn.dataset.foodCat;
     state.foodSearch = "";
     if(state.foodCategory === "Add Food") renderCustomFoodForm("meal");
     else renderFoodBuilder();
   });
-
   const searchInput = document.getElementById("foodSearch");
-  if(searchInput){
-    searchInput.oninput = () => {
-      state.foodSearch = searchInput.value;
-      drawFoodResults();
-    };
-  }
+  if(searchInput) searchInput.oninput = () => { state.foodSearch = searchInput.value; drawFoodResults(); };
 
   function drawFoodResults(){
     const results = document.getElementById("foodResults");
+    if(!results) return;
     let foods = state.foods.filter(f => f.active !== false);
-    const term = (state.foodSearch || "").toLowerCase().trim();
-
-    if(state.foodCategory === "All"){
-      if(term){
-        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
-      }
-    }else if(state.foodCategory === "Search"){
-      if(term){
-        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
-      }else{
-        foods = foods.filter(f => f.favorite).slice(0,20);
-      }
+    const term = (state.foodSearch||"").toLowerCase().trim();
+    if(state.foodCategory === "All" || state.foodCategory === "Search"){
+      if(term) foods = foods.filter(f => `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().includes(term));
+      else if(state.foodCategory === "Search") foods = foods.filter(f => f.favorite).slice(0,20);
     }else{
       foods = foods.filter(f => f.category === state.foodCategory);
-      if(term){
-        foods = foods.filter(f => `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags || ""}`.toLowerCase().includes(term));
-      }
+      if(term) foods = foods.filter(f => `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().includes(term));
     }
-
-    foods = foods.sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite) || String(a.name).localeCompare(String(b.name))).slice(0,40);
-
-    if(!foods.length){
-      results.innerHTML = `<p class="muted small">No food found. Try All, Search, or Add Food.</p>`;
-      return;
-    }
-
-    results.innerHTML = foods.map((f,i)=>`
+    foods = foods.sort((a,b) => Number(!!b.favorite)-Number(!!a.favorite) || String(a.name).localeCompare(String(b.name))).slice(0,40);
+    if(!foods.length){ results.innerHTML = `<p class="muted small">No food found. Try All, Search, or Add Food.</p>`; return; }
+    results.innerHTML = foods.map((f,i) => `
       <div class="food-card">
         <div>
           <strong>${esc(f.name)}</strong>
-          <span class="small muted">${esc(f.usualPortion || f.portion || "serving")} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
-          <div class="confidence">${esc(f.category || "Food")}</div>
+          <span class="small muted">${esc(f.usualPortion||f.portion||"serving")} · ${Number(f.usualCarbs??f.carbs??0)}g carbs</span>
+          <div class="confidence">${esc(f.category||"Food")}</div>
         </div>
         <button class="btn scarlet" data-choose-food="${i}">Choose</button>
-      </div>
-    `).join("");
-
+      </div>`).join("");
     results.querySelectorAll("[data-choose-food]").forEach(btn => btn.onclick = () => {
       const restore = setBusy(btn, "Opening…");
       const food = foods[Number(btn.dataset.chooseFood)];
-      setTimeout(() => {
-        restore();
-        renderPortionChooser(food);
-      }, 120);
+      setTimeout(() => { restore(); renderPortionChooser(food); }, 120);
     });
   }
-
   drawFoodResults();
 
   document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => {
     state.meal.items.splice(Number(btn.dataset.remove),1);
-    toast("Removed.");
-    renderFoodBuilder();
+    toast("Removed."); renderFoodBuilder();
   });
-
   const goHidden = document.getElementById("goHidden");
-  if(goHidden) goHidden.onclick = () => {
-    if(!state.meal.items.length) return toast("Add at least one food first.");
-    renderHiddenCarbs();
-  };
+  if(goHidden) goHidden.onclick = () => { if(!state.meal.items.length) return toast("Add at least one food first."); renderHiddenCarbs(); };
   const skipHidden = document.getElementById("skipHidden");
-  if(skipHidden) skipHidden.onclick = () => {
-    if(!state.meal.items.length) return toast("Add at least one food first.");
-    state.meal.hiddenChecked = true;
-    renderMealEstimate();
-  };
-  scrollToTopSoon();
+  if(skipHidden) skipHidden.onclick = () => { if(!state.meal.items.length) return toast("Add at least one food first."); state.meal.hiddenChecked = true; renderMealEstimate(); };
+  scrollUp();
 }
 
 function renderPortionChooser(food){
   const portions = Array.isArray(food.portionOptions) && food.portionOptions.length
-    ? food.portionOptions.map(p => ({ label:p.label || p.portion, portion:p.portion || p.label, carbs:Number(p.carbs || 0) }))
+    ? food.portionOptions.map(p => ({ label:p.label||p.portion, portion:p.portion||p.label, carbs:Number(p.carbs||0) }))
     : [
-      { label:food.smallPortion || "small serving", portion: food.smallPortion || "small serving", carbs:Number(food.smallCarbs ?? Math.round(Number(food.carbs || 0) * .5)) },
-      { label:food.usualPortion || food.portion || "usual serving", portion: food.usualPortion || food.portion || "usual serving", carbs:Number(food.usualCarbs ?? food.carbs ?? 0) },
-      { label:food.largePortion || "large serving", portion: food.largePortion || "large serving", carbs:Number(food.largeCarbs ?? Math.round(Number(food.carbs || 0) * 1.5)) }
+      { label:food.smallPortion||"small serving",           portion:food.smallPortion||"small serving",           carbs:Number(food.smallCarbs??Math.round(Number(food.carbs||0)*.5)) },
+      { label:food.usualPortion||food.portion||"usual serving", portion:food.usualPortion||food.portion||"usual serving", carbs:Number(food.usualCarbs??food.carbs??0) },
+      { label:food.largePortion||"large serving",           portion:food.largePortion||"large serving",           carbs:Number(food.largeCarbs??Math.round(Number(food.carbs||0)*1.5)) }
     ];
-
   layout(`
     <div class="card dark">
       <button class="btn secondary" id="backToFoodGroups">← Back to Foods</button>
@@ -987,57 +669,42 @@ function renderPortionChooser(food){
       <p class="tagline" style="text-align:left;margin-top:6px">Choose the closest measured portion.</p>
     </div>
     <div class="grid single">
-      ${portions.map((p,i)=>`
+      ${portions.map((p,i) => `
         <button class="action" data-portion="${i}">
           <strong>${esc(p.label)}</strong>
           <span>${esc(p.portion)} · ${p.carbs}g carbs</span>
-        </button>
-      `).join("")}
+        </button>`).join("")}
       <button class="action" id="customPortionBtn"><strong>Custom carbs</strong><span>Use this if an adult knows the carb count.</span></button>
-    </div>
-  `, "meal");
-
+    </div>`, "meal");
   document.getElementById("backToFoodGroups").onclick = () => renderFoodBuilder();
   document.querySelectorAll("[data-portion]").forEach(btn => btn.onclick = () => {
     const restore = setBusy(btn, "Adding…");
     const p = portions[Number(btn.dataset.portion)];
-    state.meal.items.push({
-      ...food,
-      portion: p.portion,
-      carbs: p.carbs,
-      calories: Math.round(Number(food.calories || 0) * (p.carbs / Math.max(Number(food.carbs || food.usualCarbs || p.carbs || 1),1)))
-    });
-    setTimeout(() => {
-      restore();
-      btn.classList.add("added");
-      toast("Food added.");
-      renderMealAdded(food.name);
-    }, 180);
+    state.meal.items.push({ ...food, portion:p.portion, carbs:p.carbs, calories:Math.round(Number(food.calories||0)*(p.carbs/Math.max(Number(food.carbs||food.usualCarbs||p.carbs||1),1))) });
+    setTimeout(() => { restore(); toast("Food added."); renderMealAdded(food.name); }, 180);
   });
-
   document.getElementById("customPortionBtn").onclick = () => renderCustomPortion(food);
-  scrollToTopSoon();
+  scrollUp();
 }
 
 function renderMealAdded(foodName){
-  const foodCarbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
+  const foodCarbs = state.meal.items.reduce((s,x) => s + Number(x.carbs||0), 0);
   layout(`
     <div class="card success">
       <h2>Added ✓</h2>
       <p class="muted">${esc(foodName)} was added to the meal.</p>
     </div>
-    <div class="card" id="mealSoFar">
+    <div class="card">
       <h3>Meal so far</h3>
       <div class="list">
-        ${state.meal.items.map((it,i)=>`
+        ${state.meal.items.map((it,i) => `
           <div class="list-item meal-item">
             <div>
               <strong>${esc(it.name)}</strong>
               <span class="small muted">${esc(it.portion)} · ${it.carbs}g carbs</span>
             </div>
             <button class="btn secondary" data-remove="${i}">Remove</button>
-          </div>
-        `).join("")}
+          </div>`).join("")}
       </div>
       <div class="divider-line"></div>
       <div class="kv"><span>Total food carbs</span><strong>${foodCarbs}g</strong></div>
@@ -1045,8 +712,7 @@ function renderMealAdded(foodName){
     <div class="grid single">
       <button class="action" id="addMoreFood"><strong>Add more food</strong><span>Go back to food groups.</span></button>
       <button class="action scarlet" id="continueHidden"><strong>Continue</strong><span>Check sauces, breading, drinks, or hidden carbs.</span></button>
-    </div>
-  `, "meal");
+    </div>`, "meal");
   document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => {
     state.meal.items.splice(Number(btn.dataset.remove),1);
     toast("Removed.");
@@ -1054,7 +720,7 @@ function renderMealAdded(foodName){
   });
   document.getElementById("addMoreFood").onclick = () => renderFoodBuilder();
   document.getElementById("continueHidden").onclick = () => renderHiddenCarbs();
-  scrollToTopSoon();
+  scrollUp();
 }
 
 function renderCustomPortion(food){
@@ -1064,35 +730,59 @@ function renderCustomPortion(food){
       <h2 style="margin-top:12px">Custom Carbs</h2>
       <p class="muted">Use this only if an adult or label knows the carb count.</p>
       <div class="field"><label>Portion description</label><input id="customPortionText" placeholder="Example: half plate, 1 pack, 3 pieces" /></div>
-      <div class="field"><label>Carbs</label><input id="customPortionCarbs" type="number" inputmode="numeric" placeholder="grams of carbs" /></div>
+      <div class="field"><label>Carbs (grams)</label><input id="customPortionCarbs" type="number" inputmode="numeric" placeholder="grams of carbs" /></div>
       <button class="btn scarlet full" id="addCustomPortion">Add to meal</button>
-    </div>
-  `, "meal");
-
+    </div>`, "meal");
   document.getElementById("backToPortions").onclick = () => renderPortionChooser(food);
   document.getElementById("addCustomPortion").onclick = () => {
     const btn = document.getElementById("addCustomPortion");
     const restore = setBusy(btn, "Adding…");
     const portion = document.getElementById("customPortionText").value.trim() || "custom portion";
-    const carbs = Number(document.getElementById("customPortionCarbs").value);
-    if(isNaN(carbs)){ restore(); return toast("Enter carbs."); }
+    const carbs   = Number(document.getElementById("customPortionCarbs").value);
+    if(isNaN(carbs) || carbs < 0){ restore(); return toast("Enter carbs."); }
     state.meal.items.push({ ...food, portion, carbs });
-    restore();
-    toast("Food added.");
-    renderMealAdded(food.name);
+    restore(); toast("Food added."); renderMealAdded(food.name);
   };
-  scrollToTopSoon();
+  scrollUp();
+}
+
+function renderCustomFoodForm(returnTo="meal"){
+  layout(`
+    <div class="card dark">
+      <button class="btn secondary" id="backFromAddFood">← Back to food groups</button>
+      <h2 style="margin-top:12px">Add a Food</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Ask an adult to help enter the carb count from a label.</p>
+    </div>
+    <div class="card">
+      <div class="field"><label>Food name</label><input id="cfName" placeholder="Example: Homemade arroz caldo" /></div>
+      <div class="field"><label>Portion</label><input id="cfPortion" placeholder="Example: 1 bowl, 1 cup" /></div>
+      <div class="field"><label>Carbs (grams)</label><input id="cfCarbs" type="number" inputmode="numeric" placeholder="From label or estimate" /></div>
+      <button class="btn scarlet full" id="saveCustomFood">Add this food to meal</button>
+    </div>`, "meal");
+  document.getElementById("backFromAddFood").onclick = () => { state.foodCategory = "All"; renderFoodBuilder(); };
+  document.getElementById("saveCustomFood").onclick = () => {
+    const btn = document.getElementById("saveCustomFood");
+    const restore = setBusy(btn, "Adding…");
+    const name    = document.getElementById("cfName").value.trim();
+    const portion = document.getElementById("cfPortion").value.trim() || "1 serving";
+    const carbs   = Number(document.getElementById("cfCarbs").value);
+    if(!name){ restore(); return toast("Enter a food name."); }
+    if(isNaN(carbs) || carbs < 0){ restore(); return toast("Enter carbs."); }
+    const food = { name, category:"Meals", portion, carbs, calories:0, source:"Custom - adult entered", confidence:"Low" };
+    state.meal.items.push(food);
+    restore(); toast("Food added."); renderMealAdded(name);
+  };
+  scrollUp();
 }
 
 function renderHiddenCarbs(){
   const options = [
-    {name:"Ketchup / sweet sauce", portions:[["1 tsp",2],["1 tbsp",5],["2 tbsp",10],["1/4 cup",20]]},
-    {name:"Gravy", portions:[["1 tbsp",2],["1/4 cup",6],["1/2 cup",12]]},
-    {name:"Breading", portions:[["thin coating",5],["usual coating",8],["heavy coating",15]]},
-    {name:"Honey / syrup", portions:[["1 tsp",6],["1 tbsp",17],["2 tbsp",34]]},
-    {name:"Sweet drink", portions:[["1/2 cup",12],["1 cup",25],["1 bottle/can",39]]}
+    { name:"Ketchup / sweet sauce", portions:[["1 tsp",2],["1 tbsp",5],["2 tbsp",10],["1/4 cup",20]] },
+    { name:"Gravy",                 portions:[["1 tbsp",2],["1/4 cup",6],["1/2 cup",12]] },
+    { name:"Breading",              portions:[["thin coating",5],["usual coating",8],["heavy coating",15]] },
+    { name:"Honey / syrup",         portions:[["1 tsp",6],["1 tbsp",17],["2 tbsp",34]] },
+    { name:"Sweet drink",           portions:[["1/2 cup",12],["1 cup",25],["1 bottle/can",39]] }
   ];
-
   layout(`
     <div class="card dark">
       <button class="btn secondary" id="backToMeal">← Back to Meal</button>
@@ -1102,45 +792,29 @@ function renderHiddenCarbs(){
     <div class="card">
       <p class="muted small">Add only what might be hiding in the meal. If none, continue.</p>
     </div>
-    <div class="list">
-      ${options.map((o,i)=>`
+    <div class="list" style="margin:0 14px">
+      ${options.map((o,i) => `
         <div class="card">
           <h3>${esc(o.name)}</h3>
           <div class="hidden-carb-grid">
-            ${o.portions.map((p,j)=>`<button class="btn secondary" data-hidden="${i}" data-portion="${j}">${esc(p[0])}<br><span>+${p[1]}g</span></button>`).join("")}
+            ${o.portions.map((p,j) => `<button class="btn secondary" data-hidden="${i}" data-portion="${j}">${esc(p[0])}<br><span>+${p[1]}g</span></button>`).join("")}
           </div>
-        </div>
-      `).join("")}
+        </div>`).join("")}
     </div>
     <div class="grid single">
-      <button class="action" id="notSureHidden"><strong>I’m not sure</strong><span>Ask an adult before dosing.</span></button>
+      <button class="action" id="notSureHidden"><strong>I'm not sure</strong><span>Ask an adult before dosing.</span></button>
       <button class="action scarlet" id="finishHidden"><strong>Continue to suggested Apidra</strong><span>Show the total estimate.</span></button>
-    </div>
-  `, "meal");
-
+    </div>`, "meal");
   document.getElementById("backToMeal").onclick = () => renderMealAdded("Meal");
   document.querySelectorAll("[data-hidden]").forEach(btn => btn.onclick = async () => {
     const restore = setBusy(btn, "Adding…");
     const o = options[Number(btn.dataset.hidden)];
     const p = o.portions[Number(btn.dataset.portion)];
-    state.meal.items.push({
-      name:o.name,
-      category:"Sauces / Hidden Carbs",
-      portion:p[0],
-      carbs:Number(p[1]),
-      calories:0,
-      source:"Hidden carb estimate"
-    });
+    state.meal.items.push({ name:o.name, category:"Sauces / Hidden Carbs", portion:p[0], carbs:Number(p[1]), calories:0, source:"Hidden carb estimate" });
     state.meal.hiddenChecked = true;
     await unlockBadge("hidden-carb-hunter");
-    setTimeout(() => {
-      restore();
-      btn.classList.add("added");
-      btn.innerHTML = `Added ✓<br><span>+${p[1]}g</span>`;
-      toast(`Added ${p[1]}g hidden carbs.`);
-    }, 150);
+    setTimeout(() => { restore(); btn.classList.add("added"); btn.innerHTML = `Added ✓<br><span>+${p[1]}g</span>`; toast(`Added ${p[1]}g hidden carbs.`); }, 150);
   });
-
   document.getElementById("notSureHidden").onclick = async () => {
     await createAlert("hidden_carbs_unsure","orange","Amara was not sure about hidden carbs before eating.");
     toast("Adult help note saved.");
@@ -1149,231 +823,123 @@ function renderHiddenCarbs(){
     const restore = setBusy(document.getElementById("finishHidden"), "Calculating…");
     state.meal.hiddenChecked = true;
     await unlockBadge("plate-whisperer");
-    restore();
-    renderMealEstimate();
+    restore(); renderMealEstimate();
   };
-  scrollToTopSoon();
+  scrollUp();
 }
 
-function roundDose(raw){ const unit = Number(state.settings.doseRounding || 1); return Math.round(raw / unit) * unit; }
+function roundDose(raw){ const u = Number(state.settings.doseRounding||1); return Math.round(raw/u)*u; }
 function getCorrection(glucose){
-  const g = Number(glucose || 0);
-  const target = Number(state.settings.targetGlucose || 0);
-  const factor = Number(state.settings.correctionFactor || 0);
-  if(target > 0 && factor > 0 && g > target){
-    return roundDose((g - target) / factor);
-  }
-  if(g > 250) return Number(state.settings.preMealCorrection250 || 4);
-  if(g > 180) return Number(state.settings.preMealCorrection180 || 2);
+  if(glucose > 250) return Number(state.settings.preMealCorrection250||4);
+  if(glucose > 180) return Number(state.settings.preMealCorrection180||2);
   return 0;
 }
 
 function renderMealEstimate(){
-  const carbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
-  const carbDose = roundDose(carbs / Number(state.settings.carbRatio || 8));
-  const stackingRisk = state.meal.lastApidra === "yes" || state.meal.lastApidra === "unknown";
-  const rawCorrection = getCorrection(Number(state.meal.glucose));
-  const correction = stackingRisk ? 0 : rawCorrection;
-  const estimated = carbDose + correction;
-  const maxDose = Number(state.settings.maxSingleDose || 15);
-  const overCap = estimated > maxDose;
+  const carbs     = state.meal.items.reduce((s,x) => s + Number(x.carbs||0), 0);
+  const carbDose  = roundDose(carbs / Number(state.settings.carbRatio||8));
+  const correction = getCorrection(Number(state.meal.glucose));
+  const estimated  = carbDose + correction;
   layout(`
-    <div class="card estimate-hero ${overCap ? "danger" : ""}" id="estimateHero">
-      <p class="pill">Adult check required</p>
-      <h2>Estimated Apidra</h2>
+    <div class="card estimate-hero" id="estimateHero">
+      <p class="pill">Suggested only · adult must confirm</p>
+      <h2>Suggested Apidra</h2>
       <div class="dose-number">${estimated}</div>
       <p class="dose-unit">units</p>
-      ${overCap ? `<p class="small" style="margin-top:8px"><strong>⚠ Above the ${maxDose}-unit safety cap.</strong> Double-check the carb entries with an adult — this may be a typo.</p>` : ""}
-      <p class="muted small">This is an estimate. Show this page to Mom, Dad, or Tita before injecting.</p>
+      <p class="muted small" style="margin-top:8px">ICR: 1 unit per ${state.settings.carbRatio}g carbs · Carb dose: ${carbDose}u · Correction: +${correction}u</p>
+      <p class="muted small">Confirm with an adult before injecting.</p>
     </div>
-    ${stackingRisk && rawCorrection > 0 ? `
-    <div class="card warning">
-      <h3>Correction skipped</h3>
-      <p class="muted small">Apidra ${state.meal.lastApidra === "yes" ? "was taken" : "may have been taken"} in the last ${state.settings.insulinStackingHours || 3} hours, so the auto-correction (+${rawCorrection} units) was not added. An adult can still adjust the final dose below.</p>
-    </div>` : ""}
     <div class="card">
       <h3>How this was estimated</h3>
-      <div class="kv"><span>Meal</span><strong>${esc(state.meal.type || "Meal")}</strong></div>
-      <div class="kv"><span>Current sugar</span><strong>${state.meal.glucose} mg/dL</strong></div>
-      <div class="kv"><span>Total food carbs</span><strong>${carbs}g</strong></div>
-      <div class="kv"><span>ICR — Insulin-to-Carbohydrate Ratio</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
-      <div class="kv"><span>Food dose</span><strong>${carbDose} units</strong></div>
-      <div class="kv"><span>Correction dose</span><strong>+${correction} units${stackingRisk && rawCorrection > 0 ? " (skipped)" : ""}</strong></div>
-      <div class="kv"><span>Target glucose</span><strong>${state.settings.targetGlucose || "—"} mg/dL</strong></div>
-      <p class="small muted" style="margin-top:10px">Calories are for nutrition only. Dose estimate uses parent-set medical settings.</p>
-      <p class="small muted" style="margin-top:6px">This app supports — but never replaces — the dosing plan from Amara's doctor. When in doubt, follow the doctor's plan.</p>
+      <div class="kv"><span>Pre-meal glucose</span><strong>${state.meal.glucose} mg/dL</strong></div>
+      <div class="kv"><span>Total carbs</span><strong>${carbs}g</strong></div>
+      <div class="kv"><span>ICR (carb ratio)</span><strong>1 unit / ${state.settings.carbRatio}g</strong></div>
+      <div class="kv"><span>Carb dose rounded</span><strong>${carbDose} units</strong></div>
+      <div class="kv"><span>Glucose correction</span><strong>+${correction} units</strong></div>
+      <p class="small muted" style="margin-top:10px">Insulin is calculated from carbs plus the saved family correction plan. This is a suggested estimate only — not a dosing order.</p>
     </div>
-    <div class="card">
-      <h3>Adult check</h3>
-      <p class="muted small">An adult can confirm the estimate, change the dose, or choose no insulin right now.</p>
-      <div class="field">
-        <label>Final Apidra dose confirmed by adult</label>
-        <input id="adultFinalDose" type="number" inputmode="decimal" value="${estimated}" />
-      </div>
-      <div class="grid single">
-        <button class="action scarlet" id="adultConfirmed"><strong>Confirm dose</strong><span>Save meal, log Apidra, then start the 15-minute wait timer.</span></button>
-        <button class="action" id="saveNoInsulin"><strong>No insulin right now</strong><span>Save meal only for adult review.</span></button>
-        ${CIRCLE.map(name => `<button class="action" data-call="${name}"><strong>I need ${name}</strong><span>Alert the Circle before dosing.</span></button>`).join("")}
-        <button class="action" id="backFoodFromEstimate"><strong>Back to food</strong><span>Change or add food.</span></button>
-      </div>
-    </div>
-  `, "meal");
+    <div class="grid single">
+      <button class="action scarlet" id="adultConfirmed"><strong>Adult confirmed</strong><span>Save meal and automatically log Apidra.</span></button>
+      ${CIRCLE.map(name => `<button class="action" data-call="${name}"><strong>I need ${name}</strong><span>Alert the Circle before dosing.</span></button>`).join("")}
+      <button class="action" id="saveNoInsulin"><strong>Save without insulin</strong><span>Save meal only for adult review.</span></button>
+      <button class="action" id="backFoodFromEstimate"><strong>Back to food</strong><span>Change or add food.</span></button>
+    </div>`, "meal");
   document.getElementById("adultConfirmed").onclick = async () => {
     const btn = document.getElementById("adultConfirmed");
-    const finalDose = Number(document.getElementById("adultFinalDose").value);
-    const cap = Number(state.settings.maxSingleDose || 15);
-    if(!finalDose || finalDose <= 0) return toast("Please enter the adult-confirmed Apidra dose.");
-    if(finalDose > cap) return toast(`Dose is above the ${cap}-unit safety cap set in Medical Settings. An adult can raise the cap there if the doctor's plan allows it.`);
-    const restore = setBusy(btn, "Saving and starting timer…");
-    try{
-      await saveMealLog({ adultConfirmed:true, actualDose:finalDose, autoLogInsulin:true, startTimer:true });
-    }finally{
-      restore();
-    }
+    const restore = setBusy(btn, "Saving meal and insulin…");
+    try{ await saveMealLog({ adultConfirmed:true, actualDose:estimated, autoLogInsulin:true }); }
+    finally{ restore(); }
   };
   document.querySelectorAll("[data-call]").forEach(b => b.onclick = async () => {
     const restore = setBusy(b, "Sending alert…");
-    await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Estimated Apidra: ${estimated} units.`);
+    await createAlert("circle_call","orange",`Amara requested ${b.dataset.call} during meal dosing. Suggested Apidra: ${estimated} units.`);
     await unlockBadge("caller-circle");
-    restore();
-    toast(`${b.dataset.call} alert saved.`);
+    restore(); toast(`${b.dataset.call} alert saved.`);
   });
-  document.getElementById("saveNoInsulin").onclick = () => saveMealLog({ adultConfirmed:false, actualDose:null, noInsulin:true });
+  document.getElementById("saveNoInsulin").onclick = async () => {
+    await unlockBadge("brave-pause");
+    saveMealLog({ adultConfirmed:false, actualDose:null, noInsulin:true });
+  };
   document.getElementById("backFoodFromEstimate").onclick = () => renderFoodBuilder();
-  scrollToTopSoon();
+  scrollUp();
 }
 
 async function saveMealLog(extra={}){
-  const carbs = state.meal.items.reduce((s,x)=>s + Number(x.carbs||0),0);
-  const carbDose = roundDose(carbs / Number(state.settings.carbRatio || 8));
-  const stackingRisk = state.meal.lastApidra === "yes" || state.meal.lastApidra === "unknown";
-  const correctionDose = stackingRisk ? 0 : getCorrection(Number(state.meal.glucose));
-  const estimatedDose = carbDose + correctionDose;
-  const alertLevel = state.meal.glucose >= state.settings.urgentHighThreshold ? "red" : state.meal.glucose >= state.settings.highThreshold ? "orange" : "green";
-  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs"), {
-    mealType: state.meal.type,
-    glucoseBeforeMeal: Number(state.meal.glucose),
-    items: state.meal.items.map(x => ({ name:x.name, portion:x.portion, carbs:Number(x.carbs||0), source:x.source || "" })),
-    totalCarbs: carbs,
-    carbDose, correctionDose, estimatedDose,
-    actualDose: extra.actualDose ?? null,
-    adultConfirmed: !!extra.adultConfirmed,
-    hiddenCarbsChecked: !!state.meal.hiddenChecked,
-    recentApidra: state.meal.lastApidra || "unknown",
-    ketones: state.meal.ketones || null,
-    alreadyInjected: !!extra.alreadyInjected,
-    alertLevel,
-    createdAt: serverTimestamp(),
-    enteredBy: state.roleKey
+  const carbs        = state.meal.items.reduce((s,x) => s + Number(x.carbs||0), 0);
+  const carbDose     = roundDose(carbs / Number(state.settings.carbRatio||8));
+  const correctionDose = getCorrection(Number(state.meal.glucose));
+  const estimatedDose  = carbDose + correctionDose;
+  const actualDose     = extra.actualDose ?? null;
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs"),{
+    mealType:            state.meal.type,
+    glucoseBeforeMeal:   Number(state.meal.glucose),
+    items:               state.meal.items.map(x => ({ name:x.name, portion:x.portion, carbs:Number(x.carbs||0), source:x.source||"" })),
+    totalCarbs:          carbs,
+    carbDose, correctionDose, estimatedDose, actualDose,
+    adultConfirmed:      !!extra.adultConfirmed,
+    hiddenCarbsChecked:  !!state.meal.hiddenChecked,
+    ketones:             state.meal.ketones||null,
+    alertLevel:          state.meal.glucose >= state.settings.urgentHighThreshold ? "red" : state.meal.glucose >= state.settings.highThreshold ? "orange" : "green",
+    createdAt:           serverTimestamp(),
+    enteredBy:           state.user.uid
   });
   await unlockBadge("scarlet-sentinel");
   await unlockBadge("feast-reader");
-  const actualDose = extra.actualDose ?? estimatedDose;
   if(extra.autoLogInsulin && actualDose){
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
-      insulinType:"Apidra",
-      dose:Number(actualDose),
-      reason:"Meal - adult confirmed",
-      linkedMeal:true,
-      createdAt:serverTimestamp(),
-      enteredBy:state.roleKey
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"),{
+      insulinType:"Apidra", dose:Number(actualDose),
+      reason:"Meal - adult confirmed", linkedMeal:true,
+      createdAt:serverTimestamp(), enteredBy:state.user.uid
     });
   }
-  if(extra.alreadyInjected) await createAlert("already_injected","orange",`Amara logged that she already injected ${estimatedDose} units Apidra.`);
-  toast(extra.autoLogInsulin ? "Meal saved. Apidra logged." : "Meal saved.");
-  if(extra.autoLogInsulin && extra.startTimer){
-    return renderApidraWaitTimer(actualDose);
-  }
+  toast(extra.autoLogInsulin ? "Meal saved. Insulin logged." : "Meal saved.");
   renderFlowDone({
-    title: extra.autoLogInsulin ? "Meal saved. Apidra logged." : "Meal saved",
+    title:   extra.autoLogInsulin ? "Meal saved. Insulin logged." : "Meal saved",
     message: extra.autoLogInsulin ? `Adult confirmed. Apidra logged: ${actualDose} unit(s).` : "Meal saved without insulin. Adult should review.",
     next:[
-      {view:"diary",title:"Scarlet Entry",sub:"Say how this felt."},
-      {view:"pages",title:"Scarlet Pages",sub:"Reread your entries."}
+      { view:"diary", title:"Write a Scarlet Entry", sub:"Say how this felt." },
+      { view:"pages", title:"My Scarlet Pages",      sub:"Reread your entries." }
     ]
   });
 }
 
-
-function renderApidraWaitTimer(dose){
-  const totalSeconds = 15 * 60;
-  let remaining = totalSeconds;
-  clearInterval(activeTimerInterval);
-  layout(`
-    <div class="card estimate-hero">
-      <p class="pill">Apidra saved</p>
-      <h2>Wait before eating</h2>
-      <div class="dose-number timer-number" id="timerText">15:00</div>
-      <p class="dose-unit">minutes</p>
-      <p class="muted small">Dose logged: ${dose} unit(s) Apidra. Wait 15 minutes, then eat.</p>
-    </div>
-    <div class="grid single">
-      <button class="action scarlet" id="startedEating"><strong>I started eating</strong><span>Save timer completion and return home.</span></button>
-      <button class="action danger-action" id="feelLowDuringTimer"><strong>I feel low</strong><span>Go to low sugar help now.</span></button>
-      <button class="action" id="needHelpTimer"><strong>I need help</strong><span>Call Mom, Dad, or Tita.</span></button>
-    </div>
-  `, "meal");
-
-  const update = () => {
-    const el = document.getElementById("timerText");
-    if(!el) return clearInterval(activeTimerInterval);
-    const m = Math.floor(remaining / 60);
-    const sec = String(remaining % 60).padStart(2,"0");
-    el.textContent = `${m}:${sec}`;
-    if(remaining <= 0){
-      clearInterval(activeTimerInterval);
-      playDiaryChime();
-      toast("Time to eat, Amara.");
-      el.textContent = "Time";
-      addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"timerLogs"), {
-        type:"apidra_wait",
-        dose:Number(dose),
-        status:"finished",
-        createdAt:serverTimestamp(),
-        enteredBy:state.roleKey
-      }).catch(console.warn);
-    }
-    remaining -= 1;
-  };
-  update();
-  activeTimerInterval = setInterval(update, 1000);
-
-  document.getElementById("startedEating").onclick = async () => {
-    clearInterval(activeTimerInterval);
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"timerLogs"), {
-      type:"apidra_wait",
-      dose:Number(dose),
-      status:"started_eating",
-      createdAt:serverTimestamp(),
-      enteredBy:state.roleKey
-    });
-    renderFlowDone({ title:"Timer saved", message:"Time to eat was saved.", next:[{view:"reports",title:"Reports",sub:"See logs later."}] });
-  };
-  document.getElementById("feelLowDuringTimer").onclick = () => {
-    clearInterval(activeTimerInterval);
-    state.view = "low";
-    renderLowSugar();
-  };
-  document.getElementById("needHelpTimer").onclick = () => { state.view = "circle"; render(); };
-}
-
-
+// ── HIGH SUGAR FLOW ──────────────────────────────────────────
 function renderHighSugar(){
+  state.highFlow = { glucose:null, ketones:null, symptoms:[], recentApidra:null };
   layout(`
     <div class="card warning">
       <h2>My Sugar Is High</h2>
-      <p class="muted">Let’s slow down and be safe.</p>
+      <p class="muted">Let's slow down and be safe.</p>
       <div class="field">
         <label>Current glucose mg/dL</label>
         <input id="highGlucose" type="number" inputmode="numeric" placeholder="Example: 286" />
       </div>
       <button class="btn orange full" id="startHigh">Continue</button>
-    </div>
-  `, "home");
+    </div>`, "home");
   document.getElementById("startHigh").onclick = () => {
     const g = Number(document.getElementById("highGlucose").value);
     if(!g || g < 20 || g > 600) return toast("Please enter a valid glucose number.");
-    state.highFlow = { glucose:g, ketones:null, symptoms:[], recentApidra:null };
+    state.highFlow.glucose = g;
     renderHighKetones();
   };
 }
@@ -1381,14 +947,14 @@ function renderHighSugar(){
 function renderHighKetones(){
   const g = state.highFlow.glucose;
   layout(`
-    <div class="card ${g >= state.settings.urgentHighThreshold ? "danger":"warning"}">
+    <div class="card ${g>=state.settings.urgentHighThreshold?"danger":"warning"}">
       <h2>High Sugar: ${g} mg/dL</h2>
       <p class="muted">Check ketones if strips are available. Tell an adult if unsure.</p>
     </div>
     <div class="grid single">
-      ${["Ketones negative","Trace / small","Moderate / large","No strips","I don’t know how"].map(k => `<button class="action" data-ketone-high="${k}"><strong>${k}</strong><span>Save ketone status.</span></button>`).join("")}
-    </div>
-  `, "home");
+      ${["Ketones negative","Trace / small","Moderate / large","No strips","I don't know how"].map(k => `
+        <button class="action" data-ketone-high="${k}"><strong>${k}</strong><span>Save ketone status.</span></button>`).join("")}
+    </div>`, "home");
   document.querySelectorAll("[data-ketone-high]").forEach(btn => btn.onclick = async () => {
     state.highFlow.ketones = btn.dataset.ketoneHigh;
     await addKetoneLog(g, btn.dataset.ketoneHigh);
@@ -1396,6 +962,8 @@ function renderHighKetones(){
       await createAlert("ketones_moderate_large","red",`Amara logged high glucose ${g} with moderate/large ketones.`);
       return renderEmergency("Moderate or large ketones need adult help now.");
     }
+    if(btn.dataset.ketoneHigh.includes("negative")) await unlockBadge("ketone-seer");
+    if(btn.dataset.ketoneHigh === "No strips")       await unlockBadge("truth-keeper");
     renderHighSymptoms();
   });
 }
@@ -1410,16 +978,13 @@ function renderHighSymptoms(){
     <div class="grid">
       ${symptomList.map(s => `<button class="action" data-high-symptom="${s}"><strong>${s}</strong><span>Tap to select.</span></button>`).join("")}
     </div>
-    <button class="btn orange full" id="continueHighSymptoms">Continue</button>
-  `, "home");
+    <div style="margin:0 14px 10px"><button class="btn orange full" id="continueHighSymptoms">Continue</button></div>`, "home");
   const selected = new Set();
   document.querySelectorAll("[data-high-symptom]").forEach(btn => btn.onclick = () => {
     if(btn.dataset.highSymptom === "None of these"){
-      selected.clear();
-      selected.add("None of these");
+      selected.clear(); selected.add("None of these");
       document.querySelectorAll("[data-high-symptom]").forEach(b => b.classList.remove("scarlet"));
-      btn.classList.add("scarlet");
-      return;
+      btn.classList.add("scarlet"); return;
     }
     selected.delete("None of these");
     btn.classList.toggle("scarlet");
@@ -1445,9 +1010,8 @@ function renderRecentApidra(){
     <div class="grid single">
       <button class="action" data-recent="yes"><strong>Yes</strong><span>Possible insulin stacking. No normal correction suggestion.</span></button>
       <button class="action scarlet" data-recent="no"><strong>No</strong><span>Show suggested correction from family plan.</span></button>
-      <button class="action" data-recent="unknown"><strong>I don’t know</strong><span>Ask an adult before correction.</span></button>
-    </div>
-  `, "home");
+      <button class="action" data-recent="unknown"><strong>I don't know</strong><span>Ask an adult before correction.</span></button>
+    </div>`, "home");
   document.querySelectorAll("[data-recent]").forEach(btn => btn.onclick = () => {
     state.highFlow.recentApidra = btn.dataset.recent;
     if(btn.dataset.recent === "no") renderHighCorrectionEstimate();
@@ -1464,13 +1028,12 @@ function renderHighStackingWarning(){
     <div class="grid single">
       ${CIRCLE.map(n => `<button class="action" data-alert-high="${n}"><strong>Alert ${n}</strong><span>Ask for adult help.</span></button>`).join("")}
       <button class="action scarlet" id="saveHighNoCorrection"><strong>Save high sugar check</strong><span>No correction dose suggested.</span></button>
-    </div>
-  `, "home");
+    </div>`, "home");
   document.querySelectorAll("[data-alert-high]").forEach(btn => btn.onclick = async () => {
     const restore = setBusy(btn, "Sending alert…");
     await createAlert("stacking_warning","red",`Amara is high at ${state.highFlow.glucose} and took Apidra recently or is unsure. Alerted ${btn.dataset.alertHigh}.`);
-    restore();
-    toast(`${btn.dataset.alertHigh} alert saved.`);
+    await unlockBadge("no-stack-oath");
+    restore(); toast(`${btn.dataset.alertHigh} alert saved.`);
   });
   document.getElementById("saveHighNoCorrection").onclick = () => saveHighFlow({ correctionSuggested:null, adultConfirmed:false, correctionLogged:false });
 }
@@ -1479,118 +1042,83 @@ function renderHighCorrectionEstimate(){
   const correction = getCorrection(Number(state.highFlow.glucose));
   layout(`
     <div class="card estimate-hero">
-      <p class="pill">Suggested only</p>
+      <p class="pill">Suggested only · adult must confirm</p>
       <h2>Suggested Correction</h2>
       <div class="dose-number">${correction}</div>
-      <p class="dose-unit">units</p>
+      <p class="dose-unit">units Apidra</p>
       <p class="muted small">Confirm with an adult before injecting.</p>
     </div>
     <div class="grid single">
       <button class="action scarlet" id="adultConfirmHigh"><strong>Adult confirmed</strong><span>Save and log correction Apidra.</span></button>
       <button class="action" id="saveHighNoInsulin"><strong>Save without insulin</strong><span>Adult should review.</span></button>
       ${CIRCLE.map(n => `<button class="action" data-alert-high="${n}"><strong>Alert ${n}</strong><span>Ask for adult help.</span></button>`).join("")}
-    </div>
-  `, "home");
+    </div>`, "home");
   document.getElementById("adultConfirmHigh").onclick = () => saveHighFlow({ correctionSuggested:correction, adultConfirmed:true, correctionLogged:true });
   document.getElementById("saveHighNoInsulin").onclick = () => saveHighFlow({ correctionSuggested:correction, adultConfirmed:false, correctionLogged:false });
   document.querySelectorAll("[data-alert-high]").forEach(btn => btn.onclick = async () => {
     const restore = setBusy(btn, "Sending alert…");
-    await createAlert("high_help","orange",`Amara is high at ${state.highFlow.glucose}. Suggested correction shown: ${correction} units. Alerted ${btn.dataset.alertHigh}.`);
-    restore();
-    toast(`${btn.dataset.alertHigh} alert saved.`);
+    await createAlert("high_help","orange",`Amara is high at ${state.highFlow.glucose}. Suggested correction: ${correction} units. Alerted ${btn.dataset.alertHigh}.`);
+    restore(); toast(`${btn.dataset.alertHigh} alert saved.`);
   });
 }
 
 async function saveHighFlow({ correctionSuggested=null, adultConfirmed=false, correctionLogged=false } = {}){
   const btn = document.querySelector("#adultConfirmHigh, #saveHighNoInsulin, #saveHighNoCorrection");
   const restore = setBusy(btn, "Saving high sugar check…");
-  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), {
-    glucose:Number(state.highFlow.glucose),
-    context:"high_sugar",
-    ketones:state.highFlow.ketones,
-    symptoms:state.highFlow.symptoms || [],
-    recentApidra:state.highFlow.recentApidra,
-    correctionSuggested,
-    adultConfirmed,
-    correctionLogged,
-    alertLevel:Number(state.highFlow.glucose)>=state.settings.urgentHighThreshold ? "red":"orange",
-    createdAt:serverTimestamp(),
-    enteredBy:state.roleKey
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"),{
+    glucose:        Number(state.highFlow.glucose),
+    context:        "high_sugar",
+    ketones:        state.highFlow.ketones,
+    symptoms:       state.highFlow.symptoms||[],
+    recentApidra:   state.highFlow.recentApidra,
+    correctionSuggested, adultConfirmed, correctionLogged,
+    alertLevel:     Number(state.highFlow.glucose)>=state.settings.urgentHighThreshold?"red":"orange",
+    createdAt:      serverTimestamp(),
+    enteredBy:      state.user.uid
   });
   if(correctionLogged && correctionSuggested){
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
-      insulinType:"Apidra",
-      dose:Number(correctionSuggested),
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"),{
+      insulinType:"Apidra", dose:Number(correctionSuggested),
       reason:"High sugar correction - adult confirmed",
-      createdAt:serverTimestamp(),
-      enteredBy:state.roleKey
+      createdAt:serverTimestamp(), enteredBy:state.user.uid
     });
   }
-  if(Number(state.highFlow.glucose) >= state.settings.urgentHighThreshold){
+  if(Number(state.highFlow.glucose)>=state.settings.urgentHighThreshold)
     await createAlert("urgent_high","red",`Amara logged urgent high glucose ${state.highFlow.glucose}. Ketones: ${state.highFlow.ketones}.`);
-  }
   await unlockBadge(Number(state.highFlow.glucose)>=300 ? "slayer-300" : "stormbreaker");
+  await unlockBadge("not-my-number");
+  if(adultConfirmed) await unlockBadge("grown-up-signal");
   restore();
   toast(correctionLogged ? "High sugar check saved. Correction logged." : "High sugar check saved.");
   renderFlowDone({
-    title: correctionLogged ? "High sugar saved. Correction logged." : "High sugar check saved",
+    title:   correctionLogged ? "High sugar saved. Correction logged." : "High sugar check saved",
     message: correctionLogged ? `Adult confirmed. Apidra correction logged: ${correctionSuggested} unit(s).` : "No correction insulin was logged. Adult should review.",
     next:[
-      {view:"circle",title:"Call My Circle",sub:"Ask an adult to help."},
-      {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
+      { view:"circle", title:"Call My Circle",       sub:"Ask an adult to help." },
+      { view:"diary",  title:"Write a Scarlet Entry", sub:"Say how this felt." }
     ]
   });
 }
 
+// ── LOW SUGAR FLOW ───────────────────────────────────────────
 function renderLowSugar(preset=null){
   layout(`
     <div class="card danger">
       <h2>Low Sugar</h2>
       <p><strong>No insulin now.</strong></p>
       <p class="muted">Enter the low reading and follow the steps.</p>
-      <div class="field"><label>Glucose mg/dL</label><input id="lowGlucose" type="number" inputmode="numeric" value="${preset || ""}" placeholder="Example: 65" /></div>
+      <div class="field">
+        <label>Glucose mg/dL</label>
+        <input id="lowGlucose" type="number" inputmode="numeric" value="${preset||""}" placeholder="Example: 65" />
+      </div>
       <button class="btn red full" id="startLowFlow">Continue</button>
-    </div>
-  `, "home");
+    </div>`, "home");
   document.getElementById("startLowFlow").onclick = () => {
     const g = Number(document.getElementById("lowGlucose").value);
     if(!g || g < 20 || g > 600) return toast("Please enter a valid glucose number.");
     state.lowFlow = { glucose:g, fastSugar:null, adult:null, recheck:null };
-    if(g < Number(state.settings.severeLowThreshold || 54)) return renderSevereLow();
     renderLowFastSugar();
   };
-}
-
-function renderSevereLow(){
-  const g = state.lowFlow.glucose;
-  // Auto-alert the whole Circle immediately — don't wait for a button press.
-  createAlert("severe_low","red",`EMERGENCY: Amara logged severely low glucose ${g} mg/dL. Check on her immediately.`).catch(()=>{});
-  layout(`
-    <div class="card danger">
-      <h2>Very Low: ${g} mg/dL</h2>
-      <p><strong>This is an emergency level. Your Circle has been alerted automatically.</strong></p>
-      <div class="divider-line"></div>
-      <p style="margin-top:10px"><strong>Do these now:</strong></p>
-      <p class="muted" style="margin-top:8px">1. Take fast sugar right away if you can swallow safely — juice, regular soda, glucose tablets.</p>
-      <p class="muted" style="margin-top:6px">2. Stay where an adult can see you. Do not be alone right now.</p>
-      <p class="muted" style="margin-top:6px">3. If you feel confused, very shaky, or cannot swallow — an adult must use glucagon if available and call emergency help.</p>
-      <p class="muted" style="margin-top:6px">4. <strong>No insulin.</strong></p>
-    </div>
-    <div class="grid single">
-      <button class="action scarlet" id="severeTookSugar"><strong>I took fast sugar</strong><span>Continue safety steps with an adult.</span></button>
-      ${CIRCLE.map(n => `<button class="action danger-action" data-severe-call="${n}"><strong>Alert ${n} again</strong><span>Send another alert now.</span></button>`).join("")}
-    </div>
-  `, "home");
-  document.getElementById("severeTookSugar").onclick = () => {
-    state.lowFlow.fastSugar = "fast sugar (severe low)";
-    renderLowAdult();
-  };
-  document.querySelectorAll("[data-severe-call]").forEach(btn => btn.onclick = async () => {
-    const restore = setBusy(btn, "Sending alert…");
-    await createAlert("severe_low","red",`EMERGENCY repeat: Amara is severely low at ${g} mg/dL and asked for ${btn.dataset.severeCall}.`);
-    restore();
-    toast(`${btn.dataset.severeCall} alerted.`);
-  });
 }
 
 function renderLowFastSugar(){
@@ -1605,8 +1133,7 @@ function renderLowFastSugar(){
       <button class="action scarlet" data-fast="yes"><strong>Yes, I took fast sugar</strong><span>Juice, glucose tablets, candy, or plan-approved fast sugar.</span></button>
       <button class="action" data-fast="not_yet"><strong>Not yet</strong><span>Show fast sugar choices.</span></button>
       <button class="action danger-action" data-fast="weak"><strong>I cannot / I feel too weak</strong><span>Alert my Circle now.</span></button>
-    </div>
-  `, "home");
+    </div>`, "home");
   document.querySelectorAll("[data-fast]").forEach(btn => btn.onclick = async () => {
     state.lowFlow.fastSugar = btn.dataset.fast;
     if(btn.dataset.fast === "weak"){
@@ -1614,6 +1141,7 @@ function renderLowFastSugar(){
       return renderLowAdult();
     }
     if(btn.dataset.fast === "not_yet") return renderLowFastSugarChoices();
+    await unlockBadge("sweet-rescue");
     renderLowAdult();
   });
 }
@@ -1625,11 +1153,12 @@ function renderLowFastSugarChoices(){
       <p class="muted">Choose what you took or will take based on the family plan.</p>
     </div>
     <div class="grid">
-      ${["Juice box","Glucose tablets","Regular soda","Candy","Honey","Other fast sugar"].map(x => `<button class="action" data-choice="${x}"><strong>${x}</strong><span>Save this choice.</span></button>`).join("")}
-    </div>
-  `, "home");
-  document.querySelectorAll("[data-choice]").forEach(btn => btn.onclick = () => {
+      ${["Juice box","Glucose tablets","Regular soda","Candy","Honey","Other fast sugar"].map(x => `
+        <button class="action" data-choice="${x}"><strong>${x}</strong><span>Save this choice.</span></button>`).join("")}
+    </div>`, "home");
+  document.querySelectorAll("[data-choice]").forEach(btn => btn.onclick = async () => {
     state.lowFlow.fastSugar = btn.dataset.choice;
+    await unlockBadge("sweet-rescue");
     renderLowAdult();
   });
 }
@@ -1643,17 +1172,13 @@ function renderLowAdult(){
     <div class="grid single">
       <button class="action scarlet" data-adult="yes"><strong>Adult knows</strong><span>Continue to recheck step.</span></button>
       ${CIRCLE.map(n => `<button class="action" data-alert-adult="${n}"><strong>Alert ${n}</strong><span>Send alert to adult dashboard.</span></button>`).join("")}
-    </div>
-  `, "home");
-  document.querySelector("[data-adult='yes']").onclick = () => {
-    state.lowFlow.adult = "adult knows";
-    renderLowRecheck();
-  };
+    </div>`, "home");
+  document.querySelector("[data-adult='yes']").onclick = () => { state.lowFlow.adult = "adult knows"; renderLowRecheck(); };
   document.querySelectorAll("[data-alert-adult]").forEach(btn => btn.onclick = async () => {
     const restore = setBusy(btn, "Sending alert…");
-    await createAlert("low_alert","red",`Amara is low at ${state.lowFlow.glucose}. Fast sugar: ${state.lowFlow.fastSugar || "not recorded"}. Alerted ${btn.dataset.alertAdult}.`);
-    restore();
-    toast(`${btn.dataset.alertAdult} alert saved.`);
+    await createAlert("low_alert","red",`Amara is low at ${state.lowFlow.glucose}. Fast sugar: ${state.lowFlow.fastSugar||"not recorded"}. Alerted ${btn.dataset.alertAdult}.`);
+    await unlockBadge("grown-up-signal");
+    restore(); toast(`${btn.dataset.alertAdult} alert saved.`);
     state.lowFlow.adult = `alerted ${btn.dataset.alertAdult}`;
     renderLowRecheck();
   });
@@ -1669,11 +1194,10 @@ function renderLowRecheck(){
       <button class="action scarlet" id="saveLowNow"><strong>Save low sugar check</strong><span>Save now and recheck later.</span></button>
       <button class="action" id="recheckNow"><strong>I rechecked now</strong><span>Enter the new reading.</span></button>
       <button class="action danger-action" id="feelWorse"><strong>I feel worse</strong><span>Alert the Circle.</span></button>
-    </div>
-  `, "home");
-  document.getElementById("saveLowNow").onclick = () => saveLowFlow(null);
-  document.getElementById("recheckNow").onclick = () => renderLowRecheckInput();
-  document.getElementById("feelWorse").onclick = async () => {
+    </div>`, "home");
+  document.getElementById("saveLowNow").onclick  = () => saveLowFlow(null);
+  document.getElementById("recheckNow").onclick  = () => renderLowRecheckInput();
+  document.getElementById("feelWorse").onclick   = async () => {
     await createAlert("low_feels_worse","red",`Amara feels worse after low sugar ${state.lowFlow.glucose}.`);
     saveLowFlow(null);
   };
@@ -1683,10 +1207,12 @@ function renderLowRecheckInput(){
   layout(`
     <div class="card">
       <h2>Recheck Reading</h2>
-      <div class="field"><label>New glucose mg/dL</label><input id="lowRecheckValue" type="number" inputmode="numeric" placeholder="Example: 82" /></div>
+      <div class="field">
+        <label>New glucose mg/dL</label>
+        <input id="lowRecheckValue" type="number" inputmode="numeric" placeholder="Example: 82" />
+      </div>
       <button class="btn scarlet full" id="saveRecheck">Save recheck</button>
-    </div>
-  `, "home");
+    </div>`, "home");
   document.getElementById("saveRecheck").onclick = () => {
     const r = Number(document.getElementById("lowRecheckValue").value);
     if(!r || r < 20 || r > 600) return toast("Please enter a valid reading.");
@@ -1697,177 +1223,68 @@ function renderLowRecheckInput(){
 async function saveLowFlow(recheck){
   const btn = document.querySelector("#saveLowNow, #saveRecheck, #feelWorse");
   const restore = setBusy(btn, "Saving low sugar check…");
-  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), {
-    glucose:Number(state.lowFlow.glucose),
-    context:"low_sugar",
-    fastSugar:state.lowFlow.fastSugar || null,
-    adult:state.lowFlow.adult || null,
-    recheck:recheck || null,
-    alertLevel:"red",
-    createdAt:serverTimestamp(),
-    enteredBy:state.roleKey
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"),{
+    glucose:    Number(state.lowFlow.glucose),
+    context:    "low_sugar",
+    fastSugar:  state.lowFlow.fastSugar||null,
+    adult:      state.lowFlow.adult||null,
+    recheck:    recheck||null,
+    alertLevel: "red",
+    createdAt:  serverTimestamp(),
+    enteredBy:  state.user.uid
   });
-  if(Number(state.lowFlow.glucose) < state.settings.lowThreshold){
-    await createAlert("low","red",`Amara logged low glucose ${state.lowFlow.glucose}. Fast sugar: ${state.lowFlow.fastSugar || "not recorded"}. Adult: ${state.lowFlow.adult || "not recorded"}.`);
-  }
+  if(Number(state.lowFlow.glucose) < state.settings.lowThreshold)
+    await createAlert("low","red",`Amara logged low glucose ${state.lowFlow.glucose}. Fast sugar: ${state.lowFlow.fastSugar||"not recorded"}. Adult: ${state.lowFlow.adult||"not recorded"}.`);
   await unlockBadge("crimson-comeback");
-  restore();
-  toast("Low sugar check saved.");
+  await unlockBadge("truth-teller");
+  restore(); toast("Low sugar check saved.");
   renderFlowDone({
-    title:"Low sugar check saved",
+    title:   "Low sugar check saved",
     message: recheck ? `Recheck saved: ${recheck} mg/dL. No insulin was logged.` : "No insulin was logged. Recheck based on the family plan.",
     next:[
-      {view:"circle",title:"Call My Circle",sub:"Ask an adult to help."},
-      {view:"diary",title:"Write a Scarlet Entry",sub:"Say how this felt."}
+      { view:"circle", title:"Call My Circle",       sub:"Ask an adult to help." },
+      { view:"diary",  title:"Write a Scarlet Entry", sub:"Say how this felt." }
     ]
   });
 }
 
-function renderLantusLog(){
-  const period = getLantusPeriod();
-  const isNight = period.startsWith("night");
-  const isMorning = period.startsWith("morning");
-  const outsideWindow = period.includes("outside");
-  const usualDose = isNight ? Number(state.settings.lantusNightDose || 8) : Number(state.settings.lantusMorningDose || 20);
-  const label = isNight ? "Tonight’s Lantus" : "Morning Lantus";
-  const timeNote = outsideWindow ? "This is outside the saved usual Lantus time. Ask an adult before continuing." : "Check the pen carefully before saving.";
-  layout(`
-    <div class="card ${outsideWindow ? "warning" : "dark"}">
-      <button class="btn secondary" id="backFromLantus" style="margin-bottom:12px">← Back Home</button>
-      <h2>My Lantus</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Long-acting insulin only.</p>
-      <div class="divider-line"></div>
-      <div class="kv"><span>${label}</span><strong>${usualDose} units</strong></div>
-      <p class="muted small" style="margin-top:10px">${esc(timeNote)}</p>
-    </div>
-    <div class="card">
-      <h3>Record Lantus</h3>
-      <div class="field">
-        <label>How many units does the pen show?</label>
-        <input id="lantusDose" type="number" inputmode="decimal" placeholder="Example: ${usualDose}" />
-      </div>
-      <div class="field">
-        <label>Adult check</label>
-        <select id="lantusAdult">
-          <option value="">Choose adult</option>
-          <option>Mom</option>
-          <option>Dad</option>
-          <option>Tita</option>
-        </select>
-      </div>
-      <button class="btn scarlet full" id="checkLantus">Check Lantus dose</button>
-    </div>
-  `, "home");
-
-  document.getElementById("backFromLantus").onclick = returnToDashboard;
-  document.getElementById("checkLantus").onclick = () => {
-    const dose = Number(document.getElementById("lantusDose").value);
-    const adult = document.getElementById("lantusAdult").value;
-    if(!dose || dose <= 0 || dose > 80) return toast("Please enter the Lantus dose.");
-    if(!adult) return toast("Please choose which adult checked.");
-    renderLantusConfirm({ dose, adult, period, usualDose, outsideWindow });
-  };
-}
-
+// ── INSULIN LOG ──────────────────────────────────────────────
 function renderInsulinLog(){
-  return renderLantusLog();
-}
-
-function renderLantusConfirm({ dose, adult, period, usualDose, outsideWindow }){
-  const isNight = period.startsWith("night");
-  const looksLikeMorningAtNight = isNight && Math.round(dose) === Math.round(Number(state.settings.lantusMorningDose || 20));
-  const overNightGuard = isNight && dose > Number(state.settings.lantusNightDose || 8) + 2;
-  const unusual = outsideWindow || Math.abs(dose - usualDose) > 1 || looksLikeMorningAtNight || overNightGuard;
-  const hardStop = looksLikeMorningAtNight || overNightGuard;
-  const title = hardStop ? "Stop and ask an adult" : unusual ? "Adult check needed" : "Confirm Lantus";
-  const message = looksLikeMorningAtNight
-    ? `This looks like the morning dose. Tonight’s usual Lantus is ${state.settings.lantusNightDose || 8} units.`
-    : unusual
-      ? `This is different from the usual ${usualDose} units for this time.`
-      : `You are about to save ${dose} units of Lantus.`;
-
-  layout(`
-    <div class="card ${hardStop ? "danger" : unusual ? "warning" : "success"}">
-      <h2>${esc(title)}</h2>
-      <p class="muted">${esc(message)}</p>
-      <div class="divider-line"></div>
-      <div class="kv"><span>Insulin</span><strong>Lantus</strong></div>
-      <div class="kv"><span>Time type</span><strong>${period.startsWith("night") ? "Night" : "Morning"}</strong></div>
-      <div class="kv"><span>Usual dose</span><strong>${usualDose} units</strong></div>
-      <div class="kv"><span>Entered dose</span><strong>${dose} units</strong></div>
-      <div class="kv"><span>Adult</span><strong>${esc(adult)}</strong></div>
-    </div>
-    ${hardStop ? `
-      <div class="card danger">
-        <h3>Adult unlock required</h3>
-        <p class="muted small">This dose will not be saved unless an adult enters their code.</p>
-        <div class="field"><label>Adult code</label><input id="adultUnlockCode" type="password" placeholder="Adult code" /></div>
-        <button class="btn red full" id="unlockAndSaveLantus">Adult unlock and save</button>
-      </div>
-    ` : ""}
-    <div class="grid single">
-      ${hardStop ? "" : `<button class="action scarlet" id="saveLantusNow"><strong>Yes, save Lantus</strong><span>I checked the pen and the adult checked.</span></button>`}
-      ${CIRCLE.map(n => `<button class="action" data-alert-lantus="${n}"><strong>Alert ${n}</strong><span>Ask for adult help.</span></button>`).join("")}
-      <button class="action" id="backLantusEdit"><strong>No, go back</strong><span>Change the dose.</span></button>
-    </div>
-  `, "home");
-
-  const save = async (override=false) => {
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), {
-      insulinType:"Lantus",
-      dose:Number(dose),
-      reason: period.startsWith("night") ? "Night long-acting" : "Morning long-acting",
-      adultCheckedBy:adult,
-      period,
-      unusualDose:unusual,
-      hardStopOverride:override,
-      createdAt:serverTimestamp(),
-      enteredBy:state.roleKey
-    });
-    if(unusual){
-      await createAlert("lantus_guardrail", hardStop ? "red" : "orange", `Lantus guardrail: ${dose} units entered for ${period}. Usual dose: ${usualDose}. Adult: ${adult}.`);
-    }
-    toast("Lantus saved.");
-    renderFlowDone({
-      title:"Lantus saved",
-      message:`Saved ${dose} units of Lantus. ${unusual ? "Adult review alert was saved." : "Dose matched the usual setting."}`,
-      next:[{view:"reports",title:"Reports",sub:"See insulin logs."}]
-    });
-  };
-
-  const saveBtn = document.getElementById("saveLantusNow");
-  if(saveBtn) saveBtn.onclick = () => save(false);
-
-  const unlockBtn = document.getElementById("unlockAndSaveLantus");
-  if(unlockBtn) unlockBtn.onclick = async () => {
-    const code = document.getElementById("adultUnlockCode").value || "";
-    const adultKey = String(adult).toLowerCase();
-    const ok = await verifyPasscode(adultKey, code);
-    if(!ok) return toast("Adult code is not correct.");
-    await save(true);
-  };
-
-  document.querySelectorAll("[data-alert-lantus]").forEach(btn => btn.onclick = async () => {
-    const restore = setBusy(btn, "Sending alert…");
-    await createAlert("lantus_help", hardStop ? "red" : "orange", `Amara needs help with Lantus. Entered ${dose} units. Usual ${usualDose}. Alerted ${btn.dataset.alertLantus}.`);
-    restore();
-    toast(`${btn.dataset.alertLantus} alert saved.`);
-  });
-  document.getElementById("backLantusEdit").onclick = renderLantusLog;
-}
-
-function renderSymptoms(){
-  const symptoms = ["Tired","Dizzy","Shaky","Hungry","Thirsty","Headache","Stomach pain","Vomiting","Sleepy","Fast breathing","Sad","Angry","Scared","I don’t know"];
   layout(`
     <div class="card">
-      <h2>I Don’t Feel Well</h2>
+      <h2>I Took Insulin</h2>
+      <p class="muted">Log what happened. Honesty protects you.</p>
+      <div class="field"><label>Insulin</label><select id="insulinType"><option>Apidra</option><option>Lantus</option></select></div>
+      <div class="field"><label>Dose units</label><input id="dose" type="number" inputmode="decimal" placeholder="Example: 6" /></div>
+      <div class="field"><label>Reason</label><select id="reason"><option>Meal</option><option>Correction</option><option>Basal</option><option>I am not sure</option></select></div>
+      <button class="btn scarlet full" id="saveInsulin">Save insulin log</button>
+    </div>`, "home");
+  document.getElementById("saveInsulin").onclick = async () => {
+    const btn     = document.getElementById("saveInsulin");
+    const restore = setBusy(btn, "Saving insulin log…");
+    const type    = document.getElementById("insulinType").value;
+    const dose    = Number(document.getElementById("dose").value);
+    const reason  = document.getElementById("reason").value;
+    if(!dose || dose <= 0){ restore(); return toast("Please enter dose."); }
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"),{ insulinType:type, dose, reason, createdAt:serverTimestamp(), enteredBy:state.user.uid });
+    if(type === "Apidra" && reason === "Correction") await createAlert("correction_logged","orange",`Amara logged correction insulin: ${dose} units Apidra.`);
+    restore(); toast("Insulin log saved.");
+    renderFlowDone({ title:"Insulin log saved", message:"The insulin dose was saved in Amara's record.", next:[{ view:"diary", title:"Write a Scarlet Entry", sub:"Say how today felt." }] });
+  };
+}
+
+// ── SYMPTOMS ─────────────────────────────────────────────────
+function renderSymptoms(){
+  const symptoms = ["Tired","Dizzy","Shaky","Hungry","Thirsty","Headache","Stomach pain","Vomiting","Sleepy","Fast breathing","Sad","Angry","Scared","I don't know"];
+  layout(`
+    <div class="card">
+      <h2>I Don't Feel Well</h2>
       <p class="muted">Tell the diary what your body feels.</p>
     </div>
     <div class="grid">
       ${symptoms.map(s => `<button class="action" data-symptom="${s}"><strong>${s}</strong><span>Tap to select.</span></button>`).join("")}
     </div>
-    <button class="btn scarlet full" id="saveSymptoms">Save symptoms</button>
-  `, "home");
+    <div style="margin:0 14px 10px"><button class="btn scarlet full" id="saveSymptoms">Save symptoms</button></div>`, "home");
   const selected = new Set();
   document.querySelectorAll("[data-symptom]").forEach(b => b.onclick = () => {
     b.classList.toggle("scarlet");
@@ -1877,255 +1294,121 @@ function renderSymptoms(){
     const btn = document.getElementById("saveSymptoms");
     const restore = setBusy(btn, "Saving symptoms…");
     const arr = [...selected];
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"), { symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.roleKey });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"),{ symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     const severe = arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x));
-    if(severe) { await unlockBadge("dark-signal-reader"); await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`); }
-    restore();
-    toast("Symptoms saved.");
+    if(severe){ await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`); }
+    restore(); toast("Symptoms saved.");
     renderFlowDone({
-      title:"Symptoms saved",
-      message: severe ? "These symptoms need adult attention. Your Circle has been alerted." : "Your symptoms were saved. Next, check glucose or tell your Circle if you still feel unwell.",
-      next:[
-        {view:"high",title:"Check High Sugar",sub:"Use this if glucose is high."},
-        {view:"low",title:"Check Low Sugar",sub:"Use this if glucose is low."},
-        {view:"circle",title:"Call My Circle",sub:"Tell Mom, Dad, or Tita."}
-      ]
+      title:   "Symptoms saved",
+      message: severe ? "These symptoms need adult attention. Your Circle has been alerted." : "Your symptoms were saved. Check glucose or tell your Circle if you still feel unwell.",
+      next:[ { view:"high",title:"Check High Sugar",sub:"Use this if glucose is high." }, { view:"low",title:"Check Low Sugar",sub:"Use this if glucose is low." }, { view:"circle",title:"Call My Circle",sub:"Tell Mom, Dad, or Tita." } ]
     });
   };
 }
 
+// ── DIARY ────────────────────────────────────────────────────
 function renderDiary(){
-  const moods = ["Brave","Tired","Angry","Sad","Okay","Proud","Scared","Confused","Strong","Lonely","Annoyed","Hopeful","Something only I can name"];
-  const prompts = [
-    "Today my body felt…",
-    "One brave thing I did today was…",
-    "The hardest part was…",
-    "I wish adults understood…",
-    "My sugar number did not define me because…",
-    "Today I was unstoppable when…",
-    "If my body could speak, it would say…",
-    "I want to write this my own way…"
-  ];
+  const moods   = ["Brave","Tired","Angry","Sad","Okay","Proud","Scared","Confused","Strong","Lonely","Annoyed","Hopeful","Something only I can name"];
+  const prompts = ["Today my body felt…","One brave thing I did today was…","The hardest part was…","I wish adults understood…","My sugar number did not define me because…","Today I was unstoppable when…","If my body could speak, it would say…","I want to write this my own way…"];
   layout(`
     <div class="card dark">
       <h2>Write a Scarlet Entry</h2>
       <p class="tagline" style="text-align:left;margin-top:6px">Give your feelings a place to go.</p>
     </div>
     <div class="card">
-      <div class="field"><label>Today I feel…</label><select id="mood">${moods.map(m=>`<option>${m}</option>`).join("")}</select></div><div class="field" id="customMoodWrap" style="display:none"><label>Name the feeling your own way</label><input id="customMood" placeholder="Only if the list does not have the right word" /></div>
-      <div class="field"><label>Prompt</label><select id="prompt">${prompts.map(p=>`<option>${p}</option>`).join("")}</select></div>
+      <div class="field"><label>Today I feel…</label><select id="mood">${moods.map(m => `<option>${m}</option>`).join("")}</select></div>
+      <div class="field" id="customMoodWrap" style="display:none"><label>Name the feeling your own way</label><input id="customMood" placeholder="Only if the list does not have the right word" /></div>
+      <div class="field"><label>Prompt</label><select id="prompt">${prompts.map(p => `<option>${p}</option>`).join("")}</select></div>
       <div class="field"><label>Scarlet Entry</label><textarea id="entry" placeholder="Today my body felt…"></textarea></div>
       <div class="field"><label>Privacy</label><select id="privacy"><option value="private">Private to Amara</option><option value="circle">Share with my Circle</option><option value="safety">Safety note</option></select></div>
       <button class="btn scarlet full" id="saveEntry">Save Scarlet Entry</button>
-    </div>
-  `, "diary");
+    </div>`, "diary");
   document.getElementById("prompt").onchange = e => document.getElementById("entry").placeholder = e.target.value;
-  document.getElementById("mood").onchange = e => { document.getElementById("customMoodWrap").style.display = e.target.value === "Something only I can name" ? "flex" : "none"; };
+  document.getElementById("mood").onchange   = e => { document.getElementById("customMoodWrap").style.display = e.target.value === "Something only I can name" ? "flex" : "none"; };
   document.getElementById("saveEntry").onclick = async () => {
-    let mood = document.getElementById("mood").value;
+    let mood   = document.getElementById("mood").value;
     if(mood === "Something only I can name") mood = document.getElementById("customMood").value.trim() || mood;
-    const prompt = document.getElementById("prompt").value;
-    const entry = document.getElementById("entry").value.trim();
+    const prompt  = document.getElementById("prompt").value;
+    const entry   = document.getElementById("entry").value.trim();
     const privacy = document.getElementById("privacy").value;
     if(!entry) return toast("Write a few words first.");
-    const doneBusy = setBusy(document.getElementById("saveEntry"), "Saving entry…");
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), { mood, prompt, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.roleKey });
-    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), { mood, privacy, createdAt:serverTimestamp(), enteredBy:state.roleKey });
+    const restore = setBusy(document.getElementById("saveEntry"), "Saving entry…");
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"),{ mood, prompt, entry, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
+    await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"),{ mood, privacy, createdAt:serverTimestamp(), enteredBy:state.user.uid });
     await unlockBadge("brave-page");
-    if(["Sad","Angry","Scared","Lonely"].includes(mood)) { await unlockBadge("girl-who-stayed"); await unlockBadge("soft-monster-tamer"); }
+    if(["Sad","Angry","Scared","Lonely"].includes(mood)){ await unlockBadge("girl-who-stayed"); await unlockBadge("soft-monster-tamer"); }
     if(mood === "Sad" || mood === "Lonely") await unlockBadge("moonlit-heart");
-    doneBusy();
-    toast("Entry saved.");
-    renderFlowDone({ title:"Scarlet Entry saved", message:"Your words are now in My Scarlet Pages.", next:[{view:"pages",title:"Read My Scarlet Pages",sub:"Open your diary archive."},{view:"vault",title:"Open The Scarlet Vault",sub:"See your courage badges."}] });
+    restore(); toast("Entry saved.");
+    renderFlowDone({ title:"Scarlet Entry saved", message:"Your words are now in My Scarlet Pages.", next:[ { view:"pages",title:"Read My Scarlet Pages",sub:"Open your diary archive." }, { view:"vault",title:"Open The Scarlet Vault",sub:"See your courage badges." } ] });
   };
 }
 
-const MOTIVATION_NUGGETS = [
-  "You can do this one step at a time.",
-  "You do not have to do this alone.",
-  "Your number is just information.",
-  "A high number is not your fault.",
-  "A low number means we help your body now.",
-  "Small steps count.",
-  "Let’s take care of you now.",
-  "You are safe to ask for help.",
-  "You are not in trouble.",
-  "Checking your sugar helps keep you safe.",
-  "You are more than your sugar number.",
-  "No need to rush. Let’s do this carefully.",
-  "You can tell the truth here.",
-  "Ask Mom, Dad, or Tita if you feel unsure.",
-  "Being safe is the goal.",
-  "You are doing a hard thing.",
-  "We can fix the next step together.",
-  "One check, then one next step.",
-  "I’m proud of you for checking in.",
-  "You can pause and start again.",
-  "Let’s make this moment smaller.",
-  "One tiny step is still a step.",
-  "You are allowed to need help.",
-  "Today does not have to be perfect.",
-  "You are learning every day.",
-  "You are loved in every number.",
-  "We only need the next safe step.",
-  "You can be honest here.",
-  "You are brave for trying."
-];
-
-const FEELING_SUPPORT = {
-  Good: {
-    messages: ["I’m glad you feel good.", "Good is a nice signal.", "I like that you feel good right now."],
-    actions: ["Go to dashboard.", "Before I Eat.", "Check sugar if it is time."]
-  },
-  Okay: {
-    messages: ["Okay is enough.", "Okay counts.", "You do not have to feel amazing to keep going."],
-    actions: ["Go to dashboard.", "Choose the next safe step.", "Check sugar if it is time."]
-  },
-  Tired: {
-    messages: ["Tired is not bad. It means your body needs care.", "It’s okay to feel tired.", "Tired is a signal. Let’s check what you need."],
-    actions: ["Check your sugar.", "Drink some water.", "Ask someone to stay with you.", "Hold your pillow or blanket.", "Choose the easiest next step.", "Tell someone: “I feel tired.”"]
-  },
-  Scared: {
-    messages: ["Scared is not bad. It means your body wants support.", "It’s okay to feel scared. We can make the moment smaller.", "A scared feeling is a signal, not a problem."],
-    actions: ["Name 3 things you can see.", "Hold your favorite thing.", "Put both feet on the floor.", "Look for 3 red things near you.", "Say: “I need help.”", "Stay close to a trusted adult.", "Write the scary thought in Scarlet Entry."]
-  },
-  Sad: {
-    messages: ["Sad is not bad. It means something feels heavy.", "It’s okay to feel sad. You are not doing anything wrong.", "A sad feeling is a signal, not a problem.", "You don’t have to get rid of the sadness right away."],
-    actions: ["Hug your pillow.", "Drink some water.", "Sit next to someone you trust.", "Write one line in Scarlet Entry.", "Wrap yourself in a blanket.", "Hold your favorite thing.", "Draw how the feeling looks.", "Say: “I feel sad and I need company.”", "Listen to one comforting song."]
-  },
-  Angry: {
-    messages: ["Angry is not bad. It means something feels too much, unfair, or frustrating.", "It’s okay to feel angry. We can help it move safely.", "Angry feelings are signals too.", "Angry does not mean you are bad."],
-    actions: ["Hold your pillow tight.", "Scribble hard on paper.", "Count 10 things in the room.", "Stamp your feet 10 times.", "Write the angry words in Scarlet Entry.", "Tear scrap paper.", "Draw the feeling as a shape or color.", "Stay near someone you trust.", "Say: “I’m angry and I need help.”"]
-  },
-  "I don’t know": {
-    messages: ["That’s okay. Sometimes feelings are mixed.", "Not knowing is allowed.", "You do not have to name it perfectly.", "Sometimes the feeling is blurry. We can still help you."],
-    actions: ["Check your sugar.", "Pick the closest feeling.", "Write “I don’t know yet” in Scarlet Entry.", "Choose one body clue: weird / heavy / annoyed / tired.", "Ask for help.", "Pick one small thing to do next."]
-  }
-};
-
-function pickRandomFromPool(pool, key, count=1){
-  const recentKey = `scarletRecent_${key}`;
-  const recent = JSON.parse(sessionStorage.getItem(recentKey) || "[]");
-  const available = pool.filter(x => !recent.includes(x));
-  const source = available.length >= count ? available : pool.slice();
-  const picked = [];
-  while(picked.length < count && source.length){
-    const idx = Math.floor(Math.random() * source.length);
-    picked.push(source.splice(idx,1)[0]);
-  }
-  sessionStorage.setItem(recentKey, JSON.stringify([...picked, ...recent].slice(0, 6)));
-  return count === 1 ? picked[0] : picked;
-}
-
-function renderHowIFeel(selectedMood=null){
-  if(!selectedMood){
-    const nugget = pickRandomFromPool(MOTIVATION_NUGGETS, "motivation", 1);
-    layout(`
-      <div class="card dark">
-        <h2>Hi Amara.</h2>
-        <p class="muted" style="margin-top:8px">${esc(nugget)}</p>
-      </div>
-      <div class="card">
-        <h3>How do you feel right now?</h3>
-        <p class="muted small" style="margin-top:6px">Feelings are not good or bad. They are messages from your heart and body.</p>
-      </div>
-      <div class="grid">
-        ${["Good","Okay","Tired","Scared","Sad","Angry","I don’t know"].map(m => `
-          <button class="action action-feeling" data-mood="${esc(m)}"><strong>${esc(m)}</strong><span>Tell the diary.</span></button>
-        `).join("")}
-      </div>
-    `, "home");
-    document.querySelectorAll("[data-mood]").forEach(btn => btn.onclick = () => renderHowIFeel(btn.dataset.mood));
-    return;
-  }
-
-  const support = FEELING_SUPPORT[selectedMood] || FEELING_SUPPORT["I don’t know"];
-  const message = pickRandomFromPool(support.messages, `msg_${selectedMood}`, 1);
-  const actions = pickRandomFromPool(support.actions, `act_${selectedMood}`, 3);
-  layout(`
-    <div class="card dark">
-      <h2>${esc(selectedMood)}</h2>
-      <p class="muted" style="margin-top:8px">${esc(message)}</p>
-    </div>
-    <div class="card">
-      <h3>Feelings are not good or bad.</h3>
-      <p class="muted">They are messages from your heart and body. Let’s listen, then choose one safe next step.</p>
-    </div>
-    <div class="card">
-      <h3>Choose one for right now:</h3>
-      <div class="grid single" style="margin-top:12px">
-        ${actions.map(a => `<button class="action" data-feel-action="${esc(a)}"><strong>${esc(a)}</strong></button>`).join("")}
-      </div>
-    </div>
-    <div class="grid single">
-      <button class="action scarlet" id="openEntryFromMood"><strong>Open Scarlet Entry</strong><span>Write what you want to say.</span></button>
-      <button class="action" id="helpFromMood"><strong>I need help</strong><span>Go to Mom, Dad, and Tita.</span></button>
-      <button class="action" id="moodGoHome"><strong>Go to dashboard</strong><span>Continue to the app.</span></button>
-    </div>
-  `, "home");
-
-  const finishMood = async (nextView="home", action="") => {
-    state.moodCheckedThisSession = true;
-    sessionStorage.setItem("scarletLastMoodAt", String(Date.now()));
-    try{
-      await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), {
-        mood:selectedMood,
-        supportMessage:message,
-        chosenAction:action || null,
-        createdAt:serverTimestamp(),
-        enteredBy:state.roleKey
-      });
-      if(["Sad","Angry","Scared"].includes(selectedMood)) await unlockBadge("girl-who-stayed");
-    }catch(err){ console.warn("Mood log skipped:", err); }
-    state.view = nextView;
-    render();
-  };
-
-  document.querySelectorAll("[data-feel-action]").forEach(btn => btn.onclick = () => finishMood("home", btn.dataset.feelAction));
-  document.getElementById("openEntryFromMood").onclick = () => finishMood("diary", "Open Scarlet Entry");
-  document.getElementById("helpFromMood").onclick = () => finishMood("circle", "I need help");
-  document.getElementById("moodGoHome").onclick = () => finishMood("home", "Go to dashboard");
-}
-
+// ── MOOD MIRROR ──────────────────────────────────────────────
 function renderMoodMirror(){
-  return renderHowIFeel();
-}
-
-function renderVault(){
-  const grouped = BADGES.reduce((acc,b)=>{ (acc[b.section] ||= []).push(b); return acc; }, {});
   layout(`
     <div class="card dark">
-      <h2>The Scarlet Vault</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Proof that you kept going.</p>
-      <p class="small muted" style="margin-top:10px">These are not prizes for perfect numbers. These are marks of courage — for checking, telling the truth, asking for help, and staying.</p>
+      <h2>Mood Mirror</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Your feelings are signals too.</p>
     </div>
     <div class="card">
-      <h3>The Wall of Proof</h3>
-      <p class="muted small">Amara is still here. Amara is learning. Amara is unstoppable.</p>
+      <p class="muted">This is not a score. This is a place to notice what your heart has been carrying.</p>
       <div class="divider-line"></div>
-      <p class="small muted">Unlocked courage marks: <strong>${state.unlockedBadges.size}</strong></p>
-      <p class="small muted" style="margin-top:6px">A high is not a failure. A low is not a defeat. Every honest log is a brave page.</p>
-    </div>
-    ${Object.entries(grouped).map(([section,badges]) => `
-      <div class="card">
-        <h3>${esc(section)}</h3>
-        <div class="badge-grid" style="margin-top:12px">
-          ${badges.map(b => {
-            const unlocked = state.unlockedBadges.has(b.id);
-            return `
-              <div class="badge-card ${unlocked ? "" : "locked"}">
-                <div class="badge-seal"><span>${unlocked ? "✦" : "◌"}</span></div>
-                <h3>${esc(b.name)}</h3>
-                <p>${unlocked ? esc(b.desc) : "Still sleeping. Waiting for its moment."}</p>
-                <p><strong>${unlocked ? "Unlocked" : "Wakes when:"}</strong> ${esc(b.rule)}</p>
-              </div>`;
-          }).join("")}
-        </div>
+      <p><strong>You are more than your numbers.</strong></p>
+      <p class="muted small" style="margin-top:8px">If today is hard, write a Scarlet Entry or call your Circle.</p>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn scarlet" id="writeMood">Write a Scarlet Entry</button>
+        <button class="btn secondary" id="callCircle">Call My Circle</button>
       </div>
-    `).join("")}
-  `, "vault");
+    </div>`, "diary");
+  document.getElementById("writeMood").onclick = () => { state.view="diary"; render(); };
+  document.getElementById("callCircle").onclick = () => { state.view="circle"; render(); };
 }
 
+// ── VAULT ────────────────────────────────────────────────────
+function renderVault(){
+  const sections = ["Safety","Food Confidence","Scarlet Pages","Streaks","Courage"];
+  const grouped  = {};
+  sections.forEach(s => grouped[s] = []);
+  BADGES.forEach(b => { if(grouped[b.section]) grouped[b.section].push(b); });
+
+  const total     = state.unlockedBadges.size;
+  const totalAll  = BADGES.length;
+
+  layout(`
+    <div class="vault-summary">
+      <div class="vault-count">${total}</div>
+      <div class="vault-label">proofs of courage unlocked</div>
+      <p class="vault-quote">This is not about perfect numbers.<br>This is proof that you kept going.</p>
+      <p class="small muted" style="margin-top:8px">${total} of ${totalAll} marks earned</p>
+    </div>
+
+    ${sections.map(section => {
+      const badges = grouped[section] || [];
+      if(!badges.length) return "";
+      return `
+        <div class="vault-section-header">${esc(section)}</div>
+        <div class="card" style="padding:14px">
+          <div class="badge-grid">
+            ${badges.map(b => {
+              const unlocked = state.unlockedBadges.has(b.id);
+              const dateStr  = unlocked && state.badgeUnlockDates[b.id] ? fmtDate(state.badgeUnlockDates[b.id]) : "";
+              return `
+                <div class="badge-card ${unlocked?"unlocked":"locked"}">
+                  <div class="badge-seal"><span>${unlocked?"✦":"◌"}</span></div>
+                  <h3>${esc(b.name)}</h3>
+                  <p class="badge-desc">${unlocked ? esc(b.subtitle) : "Still sleeping. Waiting for its moment."}</p>
+                  ${unlocked ? `<p class="badge-rule">${esc(b.desc)}</p>` : `<p class="badge-rule">Wakes when: ${esc(b.rule)}</p>`}
+                  ${dateStr ? `<p class="badge-date">${esc(dateStr)}</p>` : ""}
+                </div>`;
+            }).join("")}
+          </div>
+        </div>`;
+    }).join("")}
+  `, "vault");
+  scrollUp();
+}
+
+// ── CIRCLE ───────────────────────────────────────────────────
 function renderCircle(){
   layout(`
     <div class="card dark">
@@ -2134,353 +1417,193 @@ function renderCircle(){
     </div>
     <div class="grid single">
       ${CIRCLE.map(name => `<button class="action" data-person="${name}"><strong>I need ${name}</strong><span>Save alert request to the dashboard and email system.</span></button>`).join("")}
-    </div>
-  `, "home");
+    </div>`, "home");
   document.querySelectorAll("[data-person]").forEach(btn => btn.onclick = async () => {
     const who = btn.dataset.person;
     const restore = setBusy(btn, "Sending alert…");
     await createAlert("circle_call","orange",`Amara asked for ${who}.`);
     await unlockBadge("caller-circle");
     await unlockBadge("signal-flame");
-    restore();
-    toast("Alert saved.");
-    renderFlowDone({
-      title:`${who} alert saved`,
-      message:"Your Circle has been alerted in the adult dashboard.",
-      next:[
-        {view:"home",title:"Back Home",sub:"Return to the main screen."},
-        {view:"high",title:"Check My Sugar",sub:"Use this if you need to log a reading."},
-        {view:"diary",title:"Write a Scarlet Entry",sub:"Say what you need to say."}
-      ]
-    });
+    restore(); toast("Alert saved.");
+    renderFlowDone({ title:`${who} alert saved`, message:"Your Circle has been alerted in the adult dashboard.", next:[ { view:"home",title:"Back Home",sub:"" }, { view:"diary",title:"Write a Scarlet Entry",sub:"Say what you need to say." } ] });
   });
 }
 
+// ── EMERGENCY ────────────────────────────────────────────────
 function renderEmergency(message){
   layout(`
     <div class="card danger">
       <h2>Adult help needed now</h2>
       <p>${esc(message)}</p>
       <p class="muted" style="margin-top:10px">Tell Mom, Dad, or Tita now. If vomiting, stomach pain, very sleepy, confused, or breathing fast/deep, adults should seek urgent medical help.</p>
-      <button class="btn red full" id="alertCircle">Alert My Circle</button>
-    </div>
-  `, "home");
+      <button class="btn red full" id="alertCircle" style="margin-top:14px">Alert My Circle</button>
+    </div>`, "home");
   document.getElementById("alertCircle").onclick = async () => {
+    const restore = setBusy(document.getElementById("alertCircle"), "Sending…");
     await createAlert("emergency","critical",message);
     await unlockBadge("caller-circle");
-    toast("The Circle has been alerted.");
+    restore(); toast("The Circle has been alerted.");
   };
 }
 
-/* ═══════════════════════════════════════════════
-   FOOD LIBRARY SCREEN
-   ═══════════════════════════════════════════════ */
-function renderFoodLibrary(){
-  const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs"];
-  layout(`
-    <div class="card dark">
-      <button class="btn secondary" id="backFromFoods" style="margin-bottom:12px">← Back Home</button>
-      <h2>Food Library</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Browse, search, or add family foods.</p>
-    </div>
-
-    <div class="card">
-      <h3>Choose a food group</h3>
-      <div class="food-category-grid" style="margin-top:12px">
-        ${categories.map(c => `<button class="food-chip ${state.foodCategory===c?"active":""}" data-cat="${c}">${c}</button>`).join("")}
-      </div>
-      <div class="field" style="margin-top:10px">
-        <label>Search by name</label>
-        <input id="libSearch" value="${esc(state.foodSearch || "")}" placeholder="Try: rice, pita, juice, sinigang…" />
-      </div>
-      <div id="libResults" class="food-results" style="margin-top:10px"></div>
-    </div>
-
-    <div class="card">
-      <h3>Add a Family Food</h3>
-      <p class="muted small" style="margin-top:6px">Add foods Amara eats often. Adults can confirm carb counts.</p>
-      <div class="field"><label>Food name</label><input id="newFoodName" placeholder="Example: Mom's adobo" /></div>
-      <div class="field"><label>Usual portion</label><input id="newFoodPortion" placeholder="Example: 1 cup" /></div>
-      <div class="field"><label>Carbs (grams)</label><input id="newFoodCarbs" type="number" inputmode="numeric" placeholder="Example: 32" /></div>
-      <div class="field"><label>Calories (optional)</label><input id="newFoodCals" type="number" inputmode="numeric" placeholder="Example: 180" /></div>
-      <div class="field">
-        <label>Category</label>
-        <select id="newFoodCat">
-          ${["Meals","Breakfast Favorites","Meal Favorites","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs"].map(c=>`<option>${c}</option>`).join("")}
-        </select>
-      </div>
-      <button class="btn scarlet full" id="addFoodBtn" style="margin-top:6px">Save to Family Library</button>
-    </div>
-  `, "foods");
-
-  document.getElementById("backFromFoods").onclick = () => { state.view = "home"; render(); };
-
-  document.querySelectorAll("[data-cat]").forEach(btn => btn.onclick = () => {
-    state.foodCategory = btn.dataset.cat;
-    state.foodSearch = "";
-    renderFoodLibrary();
-  });
-
-  const searchEl = document.getElementById("libSearch");
-  if(searchEl){
-    searchEl.oninput = () => { state.foodSearch = searchEl.value; drawLibResults(); };
-  }
-
-  function drawLibResults(){
-    const results = document.getElementById("libResults");
-    if(!results) return;
-    let foods = state.foods.filter(f => f.active !== false);
-    const term = (state.foodSearch || "").toLowerCase().trim();
-
-    if(state.foodCategory && state.foodCategory !== "All"){
-      foods = foods.filter(f => f.category === state.foodCategory);
-    }
-    if(term){
-      foods = foods.filter(f => `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().includes(term));
-    }
-    foods = foods.sort((a,b) => Number(!!b.verified) - Number(!!a.verified) || String(a.name).localeCompare(String(b.name))).slice(0,50);
-
-    if(!foods.length){
-      results.innerHTML = `<p class="muted small">No foods found. Try a different search or add one below.</p>`;
-      return;
-    }
-    results.innerHTML = foods.map(f => `
-      <div class="food-card">
-        <div>
-          <strong>${esc(f.name)}</strong>
-          <span class="small muted">${esc(f.usualPortion || f.portion || "serving")} · ${Number(f.usualCarbs ?? f.carbs ?? 0)}g carbs</span>
-          <div class="confidence">${esc(f.category || "Food")} · ${f.verified ? "Family verified" : (f.source || "Library")}</div>
-        </div>
-        <span class="pill">${Number(f.usualCarbs ?? f.carbs ?? 0)}g</span>
-      </div>
-    `).join("");
-  }
-  drawLibResults();
-
-  document.getElementById("addFoodBtn").onclick = async () => {
-    const btn = document.getElementById("addFoodBtn");
-    const name = document.getElementById("newFoodName").value.trim();
-    const portion = document.getElementById("newFoodPortion").value.trim();
-    const carbs = Number(document.getElementById("newFoodCarbs").value);
-    const calories = Number(document.getElementById("newFoodCals").value) || 0;
-    const category = document.getElementById("newFoodCat").value;
-    if(!name) return toast("Please enter a food name.");
-    if(!carbs || carbs <= 0) return toast("Please enter the carb amount.");
-    const restore = setBusy(btn, "Saving…");
-    try {
-      const newFood = { name, usualPortion:portion, usualCarbs:carbs, carbs, portion, calories, category, source:"Family Verified", verified:true, active:true, createdAt:serverTimestamp(), addedBy:state.roleKey };
-      await addDoc(collection(db,"families",FAMILY_ID,"foodLibrary"), newFood);
-      state.foods.push(newFood);
-      toast(`${name} saved to the family library.`);
-      document.getElementById("newFoodName").value = "";
-      document.getElementById("newFoodPortion").value = "";
-      document.getElementById("newFoodCarbs").value = "";
-      document.getElementById("newFoodCals").value = "";
-      drawLibResults();
-    } catch(err) {
-      toast("Could not save food. Please try again.");
-    } finally {
-      restore();
-    }
-  };
-}
-
-/* ═══════════════════════════════════════════════
-   REPORTS SCREEN
-   ═══════════════════════════════════════════════ */
-async function renderReports(){
-  layout(`
-    <div class="card dark">
-      <button class="btn secondary" id="backFromReports" style="margin-bottom:12px">← Back</button>
-      <h2>Reports</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Patterns for adults and doctors.</p>
-    </div>
-    <div class="card" id="reportContent">
-      <p class="muted small">Loading reports…</p>
-    </div>
-  `, state.role === "child" ? "home" : "adult");
-
-  document.getElementById("backFromReports").onclick = () => {
-    state.view = state.role === "child" ? "home" : "adult";
-    render();
-  };
-
-  try {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-
-    const [glucoseSnap, mealSnap, insulinSnap, moodSnap] = await Promise.all([
-      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"glucoseLogs"), orderBy("createdAt","desc"), limit(100))),
-      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs"), orderBy("createdAt","desc"), limit(100))),
-      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"), orderBy("createdAt","desc"), limit(100))),
-      getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"moodLogs"), orderBy("createdAt","desc"), limit(30)))
-    ]);
-
-    const glucoseLogs = glucoseSnap.docs.map(d => d.data());
-    const mealLogs = mealSnap.docs.map(d => d.data());
-    const insulinLogs = insulinSnap.docs.map(d => d.data());
-    const moodLogs = moodSnap.docs.map(d => d.data());
-
-    const inDays = (logs, days) => {
-      const since = Date.now() - days * 24 * 60 * 60 * 1000;
-      return logs.filter(l => l.createdAt?.toDate?.()?.getTime?.() > since || true);
-    };
-
-    const g7 = glucoseLogs.slice(0, Math.min(glucoseLogs.length, 30));
-    const avgGlucose = g7.length ? Math.round(g7.reduce((s,l) => s + (Number(l.glucose)||0), 0) / g7.length) : null;
-    const highs = g7.filter(l => Number(l.glucose) >= (state.settings.highThreshold||250)).length;
-    const lows = g7.filter(l => Number(l.glucose) < (state.settings.lowThreshold||70)).length;
-    const meals7 = mealLogs.slice(0, 21);
-    const avgCarbs = meals7.length ? Math.round(meals7.reduce((s,m) => s + (Number(m.totalCarbs)||0), 0) / meals7.length) : null;
-    const insulinCount = insulinLogs.slice(0,21).length;
-    const moods7 = moodLogs.slice(0,14);
-    const moodCounts = moods7.reduce((acc,m) => { acc[m.mood] = (acc[m.mood]||0)+1; return acc; }, {});
-    const topMoods = Object.entries(moodCounts).sort((a,b)=>b[1]-a[1]).slice(0,4);
-
-    const reportEl = document.getElementById("reportContent");
-    if(!reportEl) return;
-    reportEl.innerHTML = `
-      <h3>7-Day Summary</h3>
-      <div style="margin-top:12px">
-        ${avgGlucose !== null ? `<div class="kv"><span>Average glucose</span><strong>${avgGlucose} mg/dL</strong></div>` : ""}
-        <div class="kv"><span>High readings</span><strong>${highs} reading${highs!==1?"s":""}</strong></div>
-        <div class="kv"><span>Low readings</span><strong>${lows} reading${lows!==1?"s":""}</strong></div>
-        <div class="kv"><span>Meals logged</span><strong>${meals7.length}</strong></div>
-        ${avgCarbs !== null ? `<div class="kv"><span>Avg carbs per meal</span><strong>${avgCarbs}g</strong></div>` : ""}
-        <div class="kv"><span>Insulin doses logged</span><strong>${insulinCount}</strong></div>
-      </div>
-      <div class="divider-line" style="margin:14px 0"></div>
-      <h3>Mood Pattern</h3>
-      <div style="margin-top:12px">
-        ${topMoods.length ? topMoods.map(([mood,count]) => `
-          <div class="kv"><span>${esc(mood)}</span><strong>${count}×</strong></div>
-        `).join("") : `<p class="muted small">No mood entries yet.</p>`}
-      </div>
-      <div class="divider-line" style="margin:14px 0"></div>
-      <h3>Recent Glucose Readings</h3>
-      <div class="list" style="margin-top:10px">
-        ${g7.slice(0,10).map(l => {
-          const g = Number(l.glucose);
-          const color = g >= (state.settings.urgentHighThreshold||300) ? "var(--danger2)" : g >= (state.settings.highThreshold||250) ? "var(--warn)" : g < (state.settings.lowThreshold||70) ? "var(--danger2)" : "var(--gold)";
-          const ts = l.createdAt?.toDate?.()?.toLocaleString?.() || "—";
-          return `<div class="list-item">
-            <div>
-              <strong style="color:${color}">${g} mg/dL</strong>
-              <span class="small muted">${esc(l.context || "glucose check")} · ${ts}</span>
-            </div>
-            <span class="pill" style="font-size:11px">${g >= (state.settings.highThreshold||250) ? "High" : g < (state.settings.lowThreshold||70) ? "Low" : "OK"}</span>
-          </div>`;
-        }).join("") || `<p class="muted small">No glucose logs yet.</p>`}
-      </div>
-      <div class="divider-line" style="margin:14px 0"></div>
-      <p class="small muted">PDF export and full 14-day report coming in a future phase.</p>
-    `;
-  } catch(err) {
-    const reportEl = document.getElementById("reportContent");
-    if(reportEl) reportEl.innerHTML = `<p class="muted small">Could not load reports. Check your connection and try again.</p><p class="small" style="color:var(--danger2);margin-top:8px">${esc(err.message || "")}</p>`;
-  }
-}
-
-/* ═══════════════════════════════════════════════
-   MY SCARLET PAGES — Diary Archive
-   ═══════════════════════════════════════════════ */
+// ── SCARLET PAGES ────────────────────────────────────────────
 async function renderScarletPages(){
   layout(`
     <div class="card dark">
-      <button class="btn secondary" id="backFromPages" style="margin-bottom:12px">← Back Home</button>
       <h2>My Scarlet Pages</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Every word you wrote is proof you kept going.</p>
+      <p class="tagline" style="text-align:left;margin-top:6px">Your words. Your proof. Your story.</p>
     </div>
-    <div id="pagesContent">
-      <div class="card"><p class="muted small">Loading your entries…</p></div>
-    </div>
-  `, "diary");
-
-  document.getElementById("backFromPages").onclick = () => { state.view = "home"; render(); };
-
-  try {
-    const snap = await getDocs(query(
-      collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"),
-      orderBy("createdAt","desc"),
-      limit(50)
-    ));
-
-    const el = document.getElementById("pagesContent");
-    if(!el) return;
-
-    if(snap.empty){
-      el.innerHTML = `
-        <div class="card" style="text-align:center;padding:28px 20px">
-          <p style="font-family:var(--font-serif);font-size:20px;color:var(--scarlet);font-style:italic">The pages are waiting.</p>
-          <p class="small muted" style="margin-top:8px;line-height:1.6">When you write a Scarlet Entry, it will live here forever.</p>
-          <button class="btn scarlet full" style="margin-top:16px" id="writeFirstEntry">Write Your First Entry</button>
+    <div class="card" id="pagesContainer">
+      <p class="muted small">Loading your entries…</p>
+    </div>`, "diary");
+  try{
+    const snap = await getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), orderBy("createdAt","desc"), limit(30)));
+    const container = document.getElementById("pagesContainer");
+    if(!container) return;
+    if(snap.empty){ container.innerHTML = `<div class="empty-state"><p>No entries yet. Write your first Scarlet Entry — your words matter.</p></div>`; return; }
+    await unlockBadge("vault-keeper");
+    container.innerHTML = snap.docs.map(d => {
+      const entry = d.data();
+      return `
+        <div class="page-entry">
+          <span class="mood-tag">${esc(entry.mood||"Feeling")}</span>
+          <p class="entry-text">${esc(entry.entry)}</p>
+          <p class="entry-date">${fmtDate(entry.createdAt)}</p>
         </div>`;
-      const btn = document.getElementById("writeFirstEntry");
-      if(btn) btn.onclick = () => { state.view = "diary"; render(); };
+    }).join("");
+  }catch(err){
+    console.error(err);
+    const container = document.getElementById("pagesContainer");
+    if(container) container.innerHTML = `<div class="empty-state"><p>Could not load entries. Check your connection and try again.</p></div>`;
+  }
+}
+
+// ── REPORTS ──────────────────────────────────────────────────
+async function renderReports(){
+  if(state.role === "child"){
+    layout(`
+      <div class="card">
+        <h2>Reports</h2>
+        <p class="muted">Reports are for adults and doctors. Ask Mom, Dad, or Tita to open the adult dashboard to see the full report.</p>
+        <button class="btn secondary full" id="backFromReports" style="margin-top:12px">← Back Home</button>
+      </div>`, "reports");
+    document.getElementById("backFromReports").onclick = () => { state.view = "home"; render(); };
+    return;
+  }
+  renderReportsData();
+}
+
+async function renderReportsData(){
+  $app.innerHTML = `
+    <div class="screen">
+      <div class="topbar">
+        <div class="logo-lockup">
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title"><strong>Reports</strong><p class="small muted">Adult pattern review</p></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="build-tag">${BUILD}</span>
+          <button class="btn secondary" id="backFromAdultReports">← Back</button>
+        </div>
+      </div>
+      <div class="card" id="reportsContent">
+        <p class="muted small">Loading reports…</p>
+      </div>
+    </div>`;
+  document.getElementById("backFromAdultReports").onclick = () => renderAdult();
+
+  try{
+    const childPath = name => collection(db,"families",FAMILY_ID,"children",CHILD_ID,name);
+    const now       = new Date();
+    const day7ago   = new Date(now - 7*24*60*60*1000);
+    const day14ago  = new Date(now - 14*24*60*60*1000);
+
+    const [gSnap, mSnap, iSnap, dSnap, aSnap, bSnap] = await Promise.all([
+      getDocs(query(childPath("glucoseLogs"),  orderBy("createdAt","desc"), limit(200))),
+      getDocs(query(childPath("mealLogs"),     orderBy("createdAt","desc"), limit(200))),
+      getDocs(query(childPath("insulinLogs"),  orderBy("createdAt","desc"), limit(200))),
+      getDocs(query(childPath("diaryEntries"), orderBy("createdAt","desc"), limit(200))),
+      getDocs(query(collection(db,"families",FAMILY_ID,"alerts"), orderBy("createdAt","desc"), limit(200))),
+      getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"))
+    ]);
+
+    const inWindow = (doc, days) => {
+      const ts = doc.data().createdAt;
+      if(!ts) return false;
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      return d >= (days === 7 ? day7ago : day14ago);
+    };
+
+    const stats = (snap, days) => snap.docs.filter(d => inWindow(d, days)).length;
+
+    const g7 = stats(gSnap,7), g14 = stats(gSnap,14);
+    const m7 = stats(mSnap,7), m14 = stats(mSnap,14);
+    const i7 = stats(iSnap,7), i14 = stats(iSnap,14);
+    const d7 = stats(dSnap,7), d14 = stats(dSnap,14);
+    const a7 = stats(aSnap,7), a14 = stats(aSnap,14);
+
+    const glucoseDocs7 = gSnap.docs.filter(d => inWindow(d,7));
+    const lows7  = glucoseDocs7.filter(d => d.data().context === "low_sugar").length;
+    const highs7 = glucoseDocs7.filter(d => d.data().context === "high_sugar").length;
+
+    const container = document.getElementById("reportsContent");
+    if(!container) return;
+
+    if(gSnap.empty && mSnap.empty && iSnap.empty){
+      container.innerHTML = `
+        <h3>Reports</h3>
+        <div class="empty-state" style="padding:24px 0">
+          <p>No report data yet. Use the app for a few logs, then come back.</p>
+        </div>`;
       return;
     }
 
-    el.innerHTML = snap.docs.map(d => {
-      const entry = d.data();
-      const ts = entry.createdAt?.toDate?.()?.toLocaleDateString?.("en-PH", { year:"numeric", month:"long", day:"numeric" }) || "—";
-      const isPrivate = entry.privacy === "private";
-      const moodColor = ["Sad","Angry","Scared","Lonely"].includes(entry.mood) ? "var(--scarlet)" : ["Brave","Proud","Strong","Hopeful"].includes(entry.mood) ? "var(--gold)" : "var(--dust)";
-      return `
-        <div class="card" style="border-left:3px solid ${moodColor};margin-bottom:0">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
-            <div>
-              <p class="small" style="color:${moodColor};font-weight:700;letter-spacing:0.5px">${esc(entry.mood || "")}</p>
-              <p class="small muted">${ts}</p>
-            </div>
-            ${isPrivate ? `<span class="pill" style="font-size:10px;opacity:0.7">Private</span>` : `<span class="pill" style="font-size:10px;background:rgba(201,168,76,0.12);color:var(--gold)">Shared</span>`}
-          </div>
-          ${entry.prompt && entry.prompt !== "I want to write this my own way…" ? `<p class="small" style="color:var(--ash);font-style:italic;margin-bottom:8px">${esc(entry.prompt)}</p>` : ""}
-          <p style="line-height:1.7;color:var(--cream);font-family:var(--font-serif);font-size:16px">${esc(entry.entry || "")}</p>
-        </div>`;
-    }).join("");
-
-  } catch(err) {
-    const el = document.getElementById("pagesContent");
-    if(el) el.innerHTML = `<div class="card"><p class="muted small">Could not load diary entries. Check your connection.</p></div>`;
-  }
-}
-
-async function addKetoneLog(glucose, ketoneResult){
-  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"), { glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.roleKey, alertLevel: ketoneResult === "Moderate / large" ? "red" : "orange" });
-}
-async function createAlert(type, severity, message){
-  const recipients = (state.settings.alertEmails || []).filter(e => e && e.includes("@"));
-  let emailStatus = "no_recipients";
-  // Real email delivery via the Firebase "Trigger Email" extension, which watches
-  // the top-level "mail" collection. See SETUP.md → Step 2. Until the extension is
-  // installed, the mail doc simply sits unsent and the alert still shows on the
-  // adult dashboard.
-  if(recipients.length){
-    try{
-      await addDoc(collection(db,"mail"), {
-        to: recipients,
-        message: {
-          subject: `🩸 Scarlet Diaries ${severity === "red" ? "URGENT" : "Alert"}: ${type.replace(/_/g," ")}`,
-          text: `${message}\n\nTime: ${new Date().toLocaleString()}\nLogged by: ${state.roleKey || "unknown"}\n\nOpen the adult dashboard to acknowledge this alert.`
-        },
-        createdAt: serverTimestamp()
-      });
-      emailStatus = "queued_for_email";
-    }catch(e){
-      console.warn("Mail queue write failed:", e);
-      emailStatus = "email_queue_failed";
+    container.innerHTML = `
+      <h3>7-Day Summary</h3>
+      <div class="report-grid" style="margin-top:12px">
+        <div class="report-stat"><div class="stat-num">${g7}</div><div class="stat-label">Glucose logs</div></div>
+        <div class="report-stat"><div class="stat-num">${m7}</div><div class="stat-label">Meal logs</div></div>
+        <div class="report-stat"><div class="stat-num">${i7}</div><div class="stat-label">Insulin logs</div></div>
+        <div class="report-stat"><div class="stat-num">${d7}</div><div class="stat-label">Diary entries</div></div>
+        <div class="report-stat"><div class="stat-num" style="color:#e74c3c">${lows7}</div><div class="stat-label">Low sugar events</div></div>
+        <div class="report-stat"><div class="stat-num" style="color:#e67e22">${highs7}</div><div class="stat-label">High sugar events</div></div>
+        <div class="report-stat"><div class="stat-num">${a7}</div><div class="stat-label">Alerts logged</div></div>
+        <div class="report-stat"><div class="stat-num" style="color:#c9a84c">${bSnap.size}</div><div class="stat-label">Badges unlocked</div></div>
+      </div>
+      <div class="divider-line" style="margin-top:16px"></div>
+      <h3 style="margin-top:14px">14-Day Summary</h3>
+      <div class="report-grid" style="margin-top:12px">
+        <div class="report-stat"><div class="stat-num">${g14}</div><div class="stat-label">Glucose logs</div></div>
+        <div class="report-stat"><div class="stat-num">${m14}</div><div class="stat-label">Meal logs</div></div>
+        <div class="report-stat"><div class="stat-num">${i14}</div><div class="stat-label">Insulin logs</div></div>
+        <div class="report-stat"><div class="stat-num">${d14}</div><div class="stat-label">Diary entries</div></div>
+        <div class="report-stat"><div class="stat-num">${a14}</div><div class="stat-label">Alerts logged</div></div>
+        <div class="report-stat"><div class="stat-num" style="color:#c9a84c">${bSnap.size}</div><div class="stat-label">Total badges</div></div>
+      </div>
+      <p class="small muted" style="margin-top:14px">Reports are for adult and doctor pattern review. Generated from Firestore logs.</p>`;
+  }catch(err){
+    console.error(err);
+    const container = document.getElementById("reportsContent");
+    if(container){
+      if(String(err.message||"").toLowerCase().includes("permission")){
+        container.innerHTML = `<div class="empty-state"><p>Reports could not load. Check Firestore rules and try again.</p></div>`;
+      }else{
+        container.innerHTML = `<div class="empty-state"><p>Reports could not load. Check your connection and try again.</p></div>`;
+      }
     }
   }
-  await addDoc(collection(db,"families",FAMILY_ID,"alerts"), {
-    childId:CHILD_ID,
-    type,
-    severity,
-    message,
-    recipients,
-    acknowledged:false,
-    emailStatus,
-    createdAt:serverTimestamp(),
-    enteredBy: state.roleKey || null
+}
+
+// ── FIREBASE HELPERS ─────────────────────────────────────────
+async function addKetoneLog(glucose, ketoneResult){
+  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"),{ glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid, alertLevel:ketoneResult==="Moderate / large"?"red":"orange" });
+}
+async function createAlert(type, severity, message){
+  await addDoc(collection(db,"families",FAMILY_ID,"alerts"),{
+    childId:CHILD_ID, type, severity, message,
+    recipients:state.settings.alertEmails||[],
+    acknowledged:false, emailStatus:"pending_function_setup",
+    createdAt:serverTimestamp(), enteredBy:state.user?.uid||null
   });
   await unlockBadge("signal-flame");
   if(severity === "red" || severity === "critical") await unlockBadge("three-guardians");
@@ -2489,31 +1612,15 @@ async function unlockBadge(id){
   if(state.unlockedBadges.has(id)) return;
   const badge = BADGES.find(b => b.id === id);
   if(!badge) return;
-  await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks",id), { badgeId:id, name:badge.name, desc:badge.desc, createdAt:serverTimestamp() }, { merge:true });
+  await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks",id),{ badgeId:id, name:badge.name, desc:badge.desc, subtitle:badge.subtitle||"", createdAt:serverTimestamp() },{ merge:true });
   state.unlockedBadges.add(id);
-}
-function showBadgeModal(id, onClose){
-  const b = BADGES.find(x => x.id === id);
-  if(!b){ onClose?.(); return; }
-  const div = document.createElement("div");
-  div.className = "modal-backdrop";
-  div.innerHTML = `
-    <div class="modal">
-      <p class="pill">Badge Unlocked</p>
-      <div class="badge-seal" style="margin-top:16px"><span>✦</span></div>
-      <h2>${esc(b.name)}</h2>
-      <p class="tagline" style="text-align:left;margin-top:8px">${esc(b.desc)}</p>
-      <p class="muted small" style="margin-top:10px">${esc(b.rule)}</p>
-      <button class="btn scarlet full" style="margin-top:18px" id="closeBadge">Continue</button>
-      <button class="btn secondary full" style="margin-top:10px" id="homeBadge">Back Home</button>
-    </div>`;
-  document.body.appendChild(div);
-  const close = () => { div.remove(); onClose?.(); };
-  document.getElementById("closeBadge").onclick = close;
-  document.getElementById("homeBadge").onclick = () => { div.remove(); state.view="home"; render(); };
+  if(!state.badgeUnlockDates[id]) state.badgeUnlockDates[id] = { toDate:()=>new Date() };
+  // Check wall-of-proof milestone
+  if(state.unlockedBadges.size >= 5) await unlockBadge("wall-proof");
+  if(state.unlockedBadges.size >= 5) await unlockBadge("steady-spark");
 }
 
-
+// ── DELETE COLLECTION (client-side) ──────────────────────────
 async function deleteCollectionClient(colRef, batchSize=200){
   let total = 0;
   while(true){
@@ -2528,6 +1635,7 @@ async function deleteCollectionClient(colRef, batchSize=200){
   return total;
 }
 
+// ── DEMO RESET ───────────────────────────────────────────────
 function renderDemoReset(){
   $app.innerHTML = `
     <div class="screen">
@@ -2541,27 +1649,23 @@ function renderDemoReset(){
           <button class="btn secondary" id="cancelResetTop">Cancel</button>
         </div>
       </div>
-
       <div class="card danger">
         <h2>Reset Demo Data</h2>
         <p class="muted" style="margin-top:8px">This will erase demo logs and saved activity so you can test the app again from a clean state.</p>
       </div>
-
       <div class="card">
         <h3>This will erase</h3>
         <div class="list" style="margin-top:10px">
           <div class="list-item"><div><strong>Meal, glucose, insulin, ketone, and symptom logs</strong><span class="small muted">All demo health logs</span></div></div>
           <div class="list-item"><div><strong>Scarlet Entries and mood logs</strong><span class="small muted">Demo diary and mood records</span></div></div>
-          <div class="list-item"><div><strong>Badge unlocks and reports</strong><span class="small muted">Demo achievements and saved reports</span></div></div>
+          <div class="list-item"><div><strong>Badge unlocks and reports</strong><span class="small muted">Demo achievements</span></div></div>
           <div class="list-item"><div><strong>Alerts</strong><span class="small muted">Adult dashboard demo alerts</span></div></div>
         </div>
       </div>
-
       <div class="card success">
         <h3>This will keep</h3>
-        <p class="muted small">User accounts, roles, settings, and food library will be kept. This avoids breaking login or setup.</p>
+        <p class="muted small">User accounts, roles, medical settings, and food library will be kept.</p>
       </div>
-
       <div class="card">
         <div class="field">
           <label>Type RESET to continue</label>
@@ -2570,9 +1674,8 @@ function renderDemoReset(){
         <button class="btn red full" id="confirmResetBtn">Reset Demo Logs</button>
         <button class="btn secondary full" style="margin-top:10px" id="cancelResetBtn">Cancel</button>
       </div>
-    </div>
-  `;
-
+    </div>`;
+  bindGlobal();
   document.getElementById("cancelResetTop").onclick = () => renderAdult();
   document.getElementById("cancelResetBtn").onclick = () => renderAdult();
   document.getElementById("confirmResetBtn").onclick = async () => {
@@ -2580,41 +1683,33 @@ function renderDemoReset(){
     if(text !== "RESET") return toast("Type RESET to confirm.");
     const btn = document.getElementById("confirmResetBtn");
     const restore = setBusy(btn, "Resetting demo data…");
-
     try{
-      const childBase = collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs");
-      const childPath = (name) => collection(db,"families",FAMILY_ID,"children",CHILD_ID,name);
-
+      const childPath = name => collection(db,"families",FAMILY_ID,"children",CHILD_ID,name);
       const counts = {};
-      counts.mealLogs = await deleteCollectionClient(childPath("mealLogs"));
+      counts.mealLogs    = await deleteCollectionClient(childPath("mealLogs"));
       counts.glucoseLogs = await deleteCollectionClient(childPath("glucoseLogs"));
       counts.insulinLogs = await deleteCollectionClient(childPath("insulinLogs"));
-      counts.ketoneLogs = await deleteCollectionClient(childPath("ketoneLogs"));
+      counts.ketoneLogs  = await deleteCollectionClient(childPath("ketoneLogs"));
       counts.symptomLogs = await deleteCollectionClient(childPath("symptomLogs"));
-      counts.diaryEntries = await deleteCollectionClient(childPath("diaryEntries"));
-      counts.moodLogs = await deleteCollectionClient(childPath("moodLogs"));
-      counts.badgeUnlocks = await deleteCollectionClient(childPath("badgeUnlocks"));
-      counts.reports = await deleteCollectionClient(childPath("reports"));
-      counts.alerts = await deleteCollectionClient(collection(db,"families",FAMILY_ID,"alerts"));
-
+      counts.diaryEntries= await deleteCollectionClient(childPath("diaryEntries"));
+      counts.moodLogs    = await deleteCollectionClient(childPath("moodLogs"));
+      counts.badgeUnlocks= await deleteCollectionClient(childPath("badgeUnlocks"));
+      counts.reports     = await deleteCollectionClient(childPath("reports"));
+      counts.alerts      = await deleteCollectionClient(collection(db,"families",FAMILY_ID,"alerts"));
       state.unlockedBadges = new Set();
-
-      restore();
-      renderDemoResetDone(counts);
+      state.badgeUnlockDates = {};
+      restore(); renderDemoResetDone(counts);
     }catch(err){
-      console.error(err);
-      restore();
-      if(String(err.message || "").toLowerCase().includes("permission")){
-        toast("Reset blocked by Firestore rules. Publish the V2.1 rules.");
-      }else{
-        toast("Reset failed. Please try again.");
-      }
+      console.error(err); restore();
+      toast(String(err.message||"").toLowerCase().includes("permission")
+        ? "Reset blocked by Firestore rules. Publish the V2.5 rules."
+        : "Reset failed. Please try again.");
     }
   };
 }
 
 function renderDemoResetDone(counts){
-  const total = Object.values(counts || {}).reduce((a,b)=>a+Number(b||0),0);
+  const total = Object.values(counts||{}).reduce((a,b) => a + Number(b||0), 0);
   $app.innerHTML = `
     <div class="screen">
       <div class="topbar">
@@ -2624,284 +1719,477 @@ function renderDemoResetDone(counts){
         </div>
         <span class="build-tag">${BUILD}</span>
       </div>
-
       <div class="card success">
         <h2>Demo reset complete</h2>
         <p class="muted" style="margin-top:8px">${total} demo record(s) were cleared.</p>
       </div>
-
       <div class="card">
         <h3>Cleared records</h3>
         <div class="list" style="margin-top:10px">
-          ${Object.entries(counts || {}).map(([k,v]) => `<div class="list-item"><div><strong>${esc(k)}</strong><span class="small muted">${Number(v || 0)} deleted</span></div></div>`).join("")}
+          ${Object.entries(counts||{}).map(([k,v]) => `<div class="list-item"><div><strong>${esc(k)}</strong><span class="small muted">${Number(v||0)} deleted</span></div></div>`).join("")}
         </div>
       </div>
-
       <div class="grid single">
         <button class="action scarlet" id="backAdultAfterReset"><strong>Back to Adult Dashboard</strong><span>Continue testing from a clean demo state.</span></button>
         <button class="action" id="logoutAfterReset"><strong>Exit</strong><span>Return to login.</span></button>
       </div>
-    </div>
-  `;
+    </div>`;
+  bindGlobal();
   document.getElementById("backAdultAfterReset").onclick = () => renderAdult();
-  document.getElementById("logoutAfterReset").onclick = () => logout();
+  document.getElementById("logoutAfterReset").onclick = () => signOut(auth);
 }
 
-// ── CSV EXPORT (for endocrinologist visits) ──────
-function csvCell(v){
-  const s = String(v ?? "");
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-}
-function downloadCSV(filename, rows){
-  const csv = rows.map(r => r.map(csvCell).join(",")).join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type:"text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
-}
-async function exportCareData(days=30){
-  const since = new Date(Date.now() - days*24*60*60*1000);
-  const base = ["families",FAMILY_ID,"children",CHILD_ID];
-  const fetchCol = async name => {
-    const snap = await getDocs(query(collection(db,...base,name), orderBy("createdAt","desc"), limit(1000)));
-    return snap.docs.map(d => d.data()).filter(x => x.createdAt?.toDate && x.createdAt.toDate() >= since);
-  };
-  const [glucose, insulin, meals, ketones] = await Promise.all([
-    fetchCol("glucoseLogs"), fetchCol("insulinLogs"), fetchCol("mealLogs"), fetchCol("ketoneLogs")
-  ]);
-  const fmt = ts => ts?.toDate ? ts.toDate().toLocaleString() : "";
-  const rows = [["Date/Time","Type","Glucose mg/dL","Insulin","Dose (units)","Carbs (g)","Details","Entered by"]];
-  glucose.forEach(g => rows.push([fmt(g.createdAt),"Glucose check",g.glucose,"","","",`${g.context || ""}${g.recheck ? ` | recheck: ${g.recheck}` : ""}${g.fastSugar ? ` | fast sugar: ${g.fastSugar}` : ""}`,g.enteredBy || ""]));
-  insulin.forEach(i => rows.push([fmt(i.createdAt),"Insulin","",i.insulinType || "",i.dose ?? "","",i.reason || "",i.enteredBy || ""]));
-  meals.forEach(m => rows.push([fmt(m.createdAt),`Meal: ${m.mealType || ""}`,m.glucoseBeforeMeal ?? "","",m.actualDose ?? m.estimatedDose ?? "",m.totalCarbs ?? "",(m.items || []).map(x => `${x.name} (${x.carbs}g)`).join("; "),m.enteredBy || ""]));
-  ketones.forEach(k => rows.push([fmt(k.createdAt),"Ketone check",k.glucose ?? "","","","",k.ketoneResult || "",k.enteredBy || ""]));
-  // Sort by date descending (rows[0] is the header)
-  const header = rows.shift();
-  rows.sort((a,b) => new Date(b[0]) - new Date(a[0]));
-  rows.unshift(header);
-  downloadCSV(`amara-care-log-${days}d-${new Date().toISOString().slice(0,10)}.csv`, rows);
-  return rows.length - 1;
-}
-
-async function saveAdultMedicalSettings(){
-  const next = {
-    carbRatio:Number(document.getElementById("setCarbRatio").value || state.settings.carbRatio || 8),
-    targetGlucose:Number(document.getElementById("setTargetGlucose").value || state.settings.targetGlucose || 120),
-    correctionFactor:Number(document.getElementById("setCorrectionFactor").value || state.settings.correctionFactor || 50),
-    insulinStackingHours:Number(document.getElementById("setActiveHours").value || state.settings.insulinStackingHours || 3),
-    doseRounding:Number(document.getElementById("setDoseRounding").value || state.settings.doseRounding || 1),
-    maxSingleDose:Number(document.getElementById("setMaxDose").value || state.settings.maxSingleDose || 15),
-    lantusMorningDose:Number(document.getElementById("setLantusMorning").value || state.settings.lantusMorningDose || 20),
-    lantusNightDose:Number(document.getElementById("setLantusNight").value || state.settings.lantusNightDose || 8),
-    highThreshold:Number(document.getElementById("setHighThreshold").value || state.settings.highThreshold || 250),
-    urgentHighThreshold:Number(document.getElementById("setUrgentHigh").value || state.settings.urgentHighThreshold || 300),
-    lowThreshold:Number(document.getElementById("setLowThreshold").value || state.settings.lowThreshold || 70),
-    updatedAt:serverTimestamp(),
-    updatedBy:state.roleKey
-  };
-  await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"), next, { merge:true });
-  state.settings = { ...state.settings, ...next };
-  await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"settingsLogs"), {
-    type:"medical_settings_update",
-    settings:{...next, updatedAt:null},
-    createdAt:serverTimestamp(),
-    enteredBy:state.roleKey
-  });
-  toast("Medical settings saved.");
-  renderAdult();
-}
-
-function renderAdult(){
-  const roleKey = localStorage.getItem("scarletRoleKey") || "adult";
-  const roleNames = { mom:"Mom", dad:"Dad", tita:"Tita" };
-  const roleName = roleNames[roleKey] || "Circle";
+// ── MEDICAL SETTINGS ─────────────────────────────────────────
+function renderMedicalSettings(){
+  const s = state.settings;
   $app.innerHTML = `
     <div class="screen">
       <div class="topbar">
         <div class="logo-lockup">
           <div class="logo-small"><span>SD</span></div>
-          <div class="topbar-title">
-            <strong>The Circle</strong>
-            <p class="small muted">Amara's Guardian Dashboard</p>
-          </div>
+          <div class="topbar-title"><strong>Medical Settings</strong><p class="small muted">Adult only</p></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="build-tag">${BUILD}</span>
-          <button class="btn secondary" data-action="logout">Exit</button>
+          <button class="btn secondary" id="backFromMedical">← Back</button>
         </div>
       </div>
-
-      <div class="card dark" style="padding:22px 20px">
-        <div style="display:flex;align-items:center;gap:12px">
-          <div class="scarlet-drop" style="width:34px;height:34px;margin-bottom:0;flex-shrink:0"></div>
-          <div>
-            <p class="small" style="color:var(--ash);letter-spacing:1px;text-transform:uppercase;font-size:10px">Welcome back</p>
-            <h2 style="font-family:var(--font-serif);font-size:22px;font-weight:400">${esc(roleName)}</h2>
-          </div>
-        </div>
-        <div class="divider-line" style="margin-top:14px"></div>
-        <p class="small" style="color:var(--ash);line-height:1.6;margin-top:10px;font-style:italic">"Celebrate effort, not perfect glucose."</p>
+      <div class="card dark">
+        <h2>Medical Settings</h2>
+        <p class="muted" style="margin-top:6px">Change these only if Amara's doctor or diabetes care team updates the plan.</p>
       </div>
-
       <div class="card">
-        <h3>Needs Attention</h3>
-        <div id="alertsList" class="list" style="margin-top:10px"><p class="muted small">Loading alerts...</p></div>
-      </div>
-
-      <div class="grid" style="margin-top:0">
-        <button class="action scarlet" id="openReportsBtn">
-          <strong>Open Reports</strong>
-          <span>7-day and 14-day summaries</span>
-        </button>
-        <button class="action plum" id="openVaultAdult">
-          <strong>Scarlet Vault</strong>
-          <span>Amara's courage marks and badges</span>
-        </button>
-      </div>
-
-      <div class="card">
-        <h3>Export for the Doctor</h3>
-        <p class="muted small" style="margin-top:6px">Download glucose, insulin, meal, and ketone logs as a spreadsheet (CSV) to bring to checkups.</p>
-        <div class="grid" style="margin-top:12px">
-          <button class="action" id="export14"><strong>Last 14 days</strong><span>Download CSV.</span></button>
-          <button class="action" id="export30"><strong>Last 30 days</strong><span>Download CSV.</span></button>
-          <button class="action" id="export90"><strong>Last 90 days</strong><span>Download CSV.</span></button>
+        <h3>ICR — Insulin to Carb Ratio</h3>
+        <p class="small muted" style="margin-top:6px">ICR means how many grams of carbs are covered by 1 unit of Apidra.</p>
+        <div class="medical-field">
+          <label>1 unit Apidra per ___ grams of carbs</label>
+          <input id="carbRatio" type="number" inputmode="numeric" value="${s.carbRatio||8}" />
         </div>
       </div>
-
       <div class="card">
-        <h3>Medical Settings</h3>
-        <p class="muted small" style="margin-top:6px">Only change these if Amara’s doctor or care plan changed. These numbers should always match the endocrinologist's written plan.</p>
-
-        <div class="field"><label>ICR — Insulin-to-Carbohydrate Ratio</label><input id="setCarbRatio" type="number" inputmode="decimal" value="${esc(state.settings.carbRatio || 8)}" /><p class="small muted">1 unit Apidra covers this many grams of carbs.</p></div>
-        <div class="field"><label>Correction Factor</label><input id="setCorrectionFactor" type="number" inputmode="decimal" value="${esc(state.settings.correctionFactor || 50)}" /><p class="small muted">1 unit Apidra lowers glucose by this many mg/dL.</p></div>
-        <div class="field"><label>Target Glucose</label><input id="setTargetGlucose" type="number" inputmode="numeric" value="${esc(state.settings.targetGlucose || 120)}" /></div>
-        <div class="field"><label>Rapid Insulin Active Time</label><input id="setActiveHours" type="number" inputmode="decimal" value="${esc(state.settings.insulinStackingHours || 3)}" /><p class="small muted">Apidra may still be active during this window.</p></div>
-        <div class="field"><label>Dose Rounding</label><input id="setDoseRounding" type="number" inputmode="decimal" value="${esc(state.settings.doseRounding || 1)}" /></div>
-        <div class="field"><label>Maximum Single Dose (safety cap)</label><input id="setMaxDose" type="number" inputmode="decimal" value="${esc(state.settings.maxSingleDose || 15)}" /><p class="small muted">Doses above this cannot be confirmed in the app. Catches typos like 450g of carbs.</p></div>
-
-        <div class="divider-line"></div>
-        <h3>Lantus / Long-Acting Insulin</h3>
-        <div class="field"><label>Morning usual Lantus dose</label><input id="setLantusMorning" type="number" inputmode="decimal" value="${esc(state.settings.lantusMorningDose || 20)}" /></div>
-        <div class="field"><label>Night usual Lantus dose</label><input id="setLantusNight" type="number" inputmode="decimal" value="${esc(state.settings.lantusNightDose || 8)}" /></div>
-
-        <div class="divider-line"></div>
-        <h3>Safety Thresholds</h3>
-        <div class="field"><label>Low threshold</label><input id="setLowThreshold" type="number" inputmode="numeric" value="${esc(state.settings.lowThreshold || 70)}" /></div>
-        <div class="field"><label>High threshold</label><input id="setHighThreshold" type="number" inputmode="numeric" value="${esc(state.settings.highThreshold || 250)}" /></div>
-        <div class="field"><label>Urgent high threshold</label><input id="setUrgentHigh" type="number" inputmode="numeric" value="${esc(state.settings.urgentHighThreshold || 300)}" /></div>
-
-        <button class="btn scarlet full" id="saveMedicalSettings">Save Medical Settings</button>
+        <h3>Glucose Thresholds</h3>
+        <div class="medical-field">
+          <label>Low sugar threshold (mg/dL)</label>
+          <input id="lowThreshold" type="number" inputmode="numeric" value="${s.lowThreshold||70}" />
+        </div>
+        <div class="medical-field">
+          <label>High sugar threshold (mg/dL)</label>
+          <input id="highThreshold" type="number" inputmode="numeric" value="${s.highThreshold||180}" />
+        </div>
+        <div class="medical-field">
+          <label>Urgent high threshold (mg/dL)</label>
+          <input id="urgentHighThreshold" type="number" inputmode="numeric" value="${s.urgentHighThreshold||300}" />
+        </div>
       </div>
-
       <div class="card">
-        <h3>Alert Emails</h3>
-        <p class="muted small" style="margin-top:6px;line-height:1.6">Every alert is queued for email to the Circle's addresses. Emails send automatically once the free "Trigger Email" extension is installed in Firebase (see SETUP.md). Until then, alerts appear only on this dashboard — check it often.</p>
+        <h3>Insulin Stacking Window</h3>
+        <div class="medical-field">
+          <label>Hours before correcting again</label>
+          <input id="insulinStackingHours" type="number" inputmode="numeric" value="${s.insulinStackingHours||3}" />
+        </div>
       </div>
-
-      <div class="card danger">
-        <h3>Demo Tools</h3>
-        <p class="muted small">Clears all logs, diary, alerts, and badges. Keeps accounts and settings intact.</p>
-        <button class="btn red full" style="margin-top:12px" id="resetDemoBtn">Reset Demo Data</button>
+      <div class="card">
+        <h3>Correction Rules (from family plan)</h3>
+        <div class="medical-field">
+          <label>Correction dose when glucose 180–250 mg/dL (units)</label>
+          <input id="preMealCorrection180" type="number" inputmode="numeric" value="${s.preMealCorrection180||2}" />
+        </div>
+        <div class="medical-field">
+          <label>Correction dose when glucose above 250 mg/dL (units)</label>
+          <input id="preMealCorrection250" type="number" inputmode="numeric" value="${s.preMealCorrection250||4}" />
+        </div>
+      </div>
+      <div class="warning-box">
+        <p>⚠️ Change these only if Amara's doctor or diabetes care team updates the plan. Insulin doses are suggested estimates only and must always be confirmed by an adult before injection.</p>
+      </div>
+      <div style="margin:0 14px 10px">
+        <button class="btn gold full" id="saveMedical">Save Doctor-Advised Settings</button>
+        <button class="btn secondary full" style="margin-top:10px" id="cancelMedical">Cancel</button>
       </div>
     </div>`;
   bindGlobal();
+  document.getElementById("backFromMedical").onclick  = () => renderAdult();
+  document.getElementById("cancelMedical").onclick    = () => renderAdult();
+  document.getElementById("saveMedical").onclick = async () => {
+    const btn = document.getElementById("saveMedical");
+    const restore = setBusy(btn, "Saving settings…");
+    const newSettings = {
+      ...state.settings,
+      carbRatio:             Number(document.getElementById("carbRatio").value) || 8,
+      lowThreshold:          Number(document.getElementById("lowThreshold").value) || 70,
+      highThreshold:         Number(document.getElementById("highThreshold").value) || 180,
+      urgentHighThreshold:   Number(document.getElementById("urgentHighThreshold").value) || 300,
+      insulinStackingHours:  Number(document.getElementById("insulinStackingHours").value) || 3,
+      preMealCorrection180:  Number(document.getElementById("preMealCorrection180").value) || 2,
+      preMealCorrection250:  Number(document.getElementById("preMealCorrection250").value) || 4,
+      updatedAt:             serverTimestamp()
+    };
+    try{
+      await setDoc(doc(db,"families",FAMILY_ID,"children",CHILD_ID,"settings","current"), newSettings, { merge:true });
+      state.settings = newSettings;
+      restore(); toast("Doctor-advised settings saved.");
+      renderAdult();
+    }catch(err){
+      console.error(err); restore();
+      toast(String(err.message||"").toLowerCase().includes("permission")
+        ? "Save blocked by Firestore rules. Check your rules file."
+        : "Could not save settings. Please try again.");
+    }
+  };
+}
+
+// ── APP MODE SWITCH ───────────────────────────────────────────
+async function saveAppMode(mode){
+  try{
+    await setDoc(doc(db,"families",FAMILY_ID,"settings","appMode"),{ mode, updatedAt:serverTimestamp() },{ merge:true });
+    state.appMode = mode;
+  }catch(err){ console.error(err); toast("Could not save app mode."); }
+}
+
+function renderModeSwitch(){
+  const isDemo = state.appMode !== "live";
+  $app.innerHTML = `
+    <div class="screen">
+      <div class="topbar">
+        <div class="logo-lockup">
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title"><strong>App Mode</strong><p class="small muted">Adult only</p></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="build-tag">${BUILD}</span>
+          <button class="btn secondary" id="backFromMode">← Back</button>
+        </div>
+      </div>
+      <div class="mode-card">
+        <div class="mode-current">
+          <strong>Current Mode</strong>
+          <span class="pill ${isDemo?"mode-demo":"mode-live"}">${isDemo?"Demo Mode":"Live Mode"}</span>
+        </div>
+        ${isDemo ? `
+          <div class="card" style="background:rgba(201,168,76,.06);border-color:rgba(201,168,76,.25);margin:0 0 10px">
+            <p class="small" style="color:var(--gold)">This is Demo Mode. Use this for testing the app only. Demo data and test logs can be reset at any time.</p>
+          </div>
+          <div class="mode-btns">
+            <button class="btn red" id="goLiveBtn">Go Live</button>
+            <button class="btn secondary" id="resetDemoFromMode">Reset Demo Data</button>
+          </div>` : `
+          <div class="card" style="background:var(--green-soft);border-color:rgba(39,174,96,.25);margin:0 0 10px">
+            <p class="small" style="color:var(--green)">Live Mode is active. This is no longer a test environment. Handle all data with care.</p>
+          </div>
+          <div class="mode-btns">
+            <button class="btn secondary" id="returnToDemoBtn">Return to Demo Mode</button>
+          </div>`}
+      </div>
+    </div>`;
+  bindGlobal();
+  document.getElementById("backFromMode").onclick = () => renderAdult();
+  if(isDemo){
+    document.getElementById("goLiveBtn").onclick = () => {
+      if(!confirm("Go Live? This should only be used when you are ready to stop using demo/test data. Live Mode should be used carefully. Continue?")) return;
+      saveAppMode("live").then(() => { toast("App is now in Live Mode."); renderAdult(); });
+    };
+    document.getElementById("resetDemoFromMode").onclick = () => renderDemoReset();
+  }else{
+    document.getElementById("returnToDemoBtn").onclick = () => {
+      if(!confirm("Return to Demo Mode? This will allow testing tools again. Continue?")) return;
+      saveAppMode("demo").then(() => { toast("App returned to Demo Mode."); renderAdult(); });
+    };
+  }
+}
+
+// ── ADULT DASHBOARD ───────────────────────────────────────────
+function renderAdult(){
+  const isDemo = state.appMode !== "live";
+  const roleKey = localStorage.getItem("scarletRoleKey") || "adult";
+  const roleLabel = ({mom:"Mom",dad:"Dad",tita:"Tita"})[roleKey] || "Adult";
+
+  $app.innerHTML = `
+    <div class="screen">
+      <div class="adult-header">
+        <div class="adult-header-left">
+          <strong>Adult Dashboard — ${esc(roleLabel)}</strong>
+          <span>The Scarlet Diaries ${BUILD}</span>
+        </div>
+        <div class="adult-header-right">
+          <span class="pill ${isDemo?"mode-demo":"mode-live"}">${isDemo?"Demo":"Live"}</span>
+          <button class="btn secondary" id="logoutAdult">Exit</button>
+        </div>
+      </div>
+
+      <!-- 1. TODAY'S SAFETY SNAPSHOT -->
+      <div class="adult-section-label">Today's Safety Snapshot</div>
+      <div class="card adult-snapshot" id="snapshotCard">
+        <p class="muted small">Loading snapshot…</p>
+      </div>
+
+      <!-- 2. NEEDS ADULT ATTENTION -->
+      <div class="adult-section-label">Needs Adult Attention</div>
+      <div class="card" id="attentionCard">
+        <div id="alertsList"><p class="muted small">Loading alerts…</p></div>
+      </div>
+
+      <!-- 3. QUICK ACTIONS -->
+      <div class="adult-section-label">Quick Actions</div>
+      <div class="quick-actions">
+        <button class="quick-action-btn" id="openReportsBtn"><span>📊</span><strong>Open Reports</strong></button>
+        <button class="quick-action-btn" id="openMedicalBtn"><span>⚕️</span><strong>Medical Settings</strong></button>
+        <button class="quick-action-btn" id="openVaultBtn"><span>🔒</span><strong>Scarlet Vault</strong></button>
+        <button class="quick-action-btn" id="openModeBtn"><span>⚙️</span><strong>App Mode</strong></button>
+      </div>
+
+      <!-- 4. RECENT CARE TIMELINE -->
+      <div class="adult-section-label">Recent Care Timeline</div>
+      <div class="card" id="timelineCard">
+        <p class="muted small">Loading timeline…</p>
+      </div>
+
+      <!-- 5. AMARA'S COURAGE -->
+      <div class="adult-section-label">Amara's Courage</div>
+      <div class="card" id="courageCard">
+        <p class="muted small">Loading courage summary…</p>
+      </div>
+
+      <!-- 6. PATTERN REVIEW -->
+      <div class="adult-section-label">Pattern Review</div>
+      <div class="card" id="patternCard">
+        <p class="muted small">Loading patterns…</p>
+      </div>
+
+      <!-- 7. DEMO TOOLS (bottom) -->
+      ${isDemo ? `
+        <div class="adult-section-label">Demo Tools</div>
+        <div class="card danger">
+          <p class="muted small">For demo/testing only. Clears logs, diary, mood, alerts, and badges while keeping accounts and settings.</p>
+          <button class="btn red full" style="margin-top:10px" id="resetDemoBtn">Reset Demo Data</button>
+        </div>` : ""}
+
+    </div>`;
+
+  bindGlobal();
+  document.getElementById("logoutAdult").onclick    = () => signOut(auth);
+  document.getElementById("openReportsBtn").onclick = () => renderReportsData();
+  document.getElementById("openMedicalBtn").onclick = () => renderMedicalSettings();
+  document.getElementById("openVaultBtn").onclick   = () => renderAdultVaultSummary();
+  document.getElementById("openModeBtn").onclick    = () => renderModeSwitch();
   const resetBtn = document.getElementById("resetDemoBtn");
   if(resetBtn) resetBtn.onclick = () => renderDemoReset();
-  const openReportsBtn = document.getElementById("openReportsBtn");
-  if(openReportsBtn) openReportsBtn.onclick = () => renderReports();
-  const openVaultAdult = document.getElementById("openVaultAdult");
-  if(openVaultAdult) openVaultAdult.onclick = () => renderVault();
-  [["export14",14],["export30",30],["export90",90]].forEach(([id, days]) => {
-    const b = document.getElementById(id);
-    if(b) b.onclick = async () => {
-      const restore = setBusy(b, "Preparing CSV…");
-      try{
-        const n = await exportCareData(days);
-        toast(n ? `Downloaded ${n} records.` : "No records in that period yet.");
-      }catch(e){
-        console.error("Export failed:", e);
-        toast("Export failed. Please try again.");
-      }finally{ restore(); }
-    };
-  });
-  const saveSettingsBtn = document.getElementById("saveMedicalSettings");
-  if(saveSettingsBtn) saveSettingsBtn.onclick = async () => {
-    const restore = setBusy(saveSettingsBtn, "Saving settings…");
-    try{ await saveAdultMedicalSettings(); } finally{ restore(); }
-  };
 
+  // Live-load alerts
   const alertsRef = collection(db,"families",FAMILY_ID,"alerts");
-  detachListeners();
-  const unsubAlerts = onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
+  onSnapshot(query(alertsRef, orderBy("createdAt","desc"), limit(20)), snap => {
+    const card = document.getElementById("attentionCard");
+    if(!card) return;
+    if(snap.empty){ card.innerHTML = `<div class="alert-item"><div class="alert-item-left"><strong>No alerts</strong><p>Amara has not sent any alerts.</p></div></div>`; return; }
+
+    const unacked = snap.docs.filter(d => !d.data().acknowledged);
+    const snapshotCard = document.getElementById("snapshotCard");
+    if(snapshotCard){
+      let statusClass = "calm", statusText = "Calm — No urgent alerts";
+      if(unacked.length > 0){
+        const hasRed = unacked.some(d => d.data().severity === "red" || d.data().severity === "critical");
+        statusClass  = hasRed ? "urgent" : "review";
+        statusText   = hasRed ? `Urgent — ${unacked.length} alert(s) need attention` : `Needs Review — ${unacked.length} alert(s) pending`;
+      }
+      const lastGlucose = snap.docs.find(d => d.data().type?.includes("high") || d.data().type?.includes("low") || d.data().type?.includes("urgent"));
+      snapshotCard.innerHTML = `
+        <div class="snapshot-status ${statusClass}">
+          <div class="status-dot"></div>
+          <p>${esc(statusText)}</p>
+        </div>
+        <div class="kv"><span>Unacknowledged alerts</span><strong>${unacked.length}</strong></div>
+        <div class="kv"><span>Total recent alerts</span><strong>${snap.size}</strong></div>
+        <div class="kv"><span>App mode</span><strong>${isDemo?"Demo Mode":"Live Mode"}</strong></div>
+        <p class="small muted" style="margin-top:8px">ICR: 1 unit per ${state.settings.carbRatio}g · Low: ${state.settings.lowThreshold} · High: ${state.settings.highThreshold} · Urgent: ${state.settings.urgentHighThreshold}</p>`;
+    }
+
     const list = document.getElementById("alertsList");
     if(!list) return;
-    if(snap.empty){ list.innerHTML = `<p class="muted small">No alerts yet.</p>`; return; }
     list.innerHTML = snap.docs.map(d => {
       const a = d.data();
-      const acknowledged = !!a.acknowledged;
-      return `<div class="list-item">
-        <div>
-          <strong>${esc(a.severity || "alert").toUpperCase()}</strong>
-          <span class="small muted">${esc(a.message)}</span>
-          <div class="confidence">${acknowledged ? "Acknowledged" : "Needs adult check"}</div>
-          <div class="confidence">${esc(a.emailStatus || "stored in Firebase")}</div>
+      const acked = !!a.acknowledged;
+      const sev   = (a.severity==="red"||a.severity==="critical") ? "red" : a.severity==="orange" ? "orange" : "green";
+      return `<div class="alert-item ${sev==="red"?"urgent":sev==="orange"?"warning":""}">
+        <div class="alert-item-left">
+          <strong>${esc(a.type||"alert")}</strong>
+          <p>${esc(a.message)}</p>
+          ${acked ? `<p class="ack-label">✓ Acknowledged</p>` : `<p style="font-size:11px;color:var(--orange)">Needs adult check</p>`}
+          <p style="font-size:11px;color:var(--text-dim)">${fmtDate(a.createdAt)}</p>
         </div>
-        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-          <span class="pill">${esc(a.type)}</span>
-          ${acknowledged ? "" : `<button class="btn secondary" data-ack="${d.id}">I saw this</button>`}
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <span class="severity-pill ${sev}">${esc(a.severity||"info").toUpperCase()}</span>
+          ${acked ? "" : `<button class="btn secondary" style="font-size:12px;padding:6px 10px" data-ack="${d.id}">I saw this</button>`}
         </div>
       </div>`;
     }).join("");
     list.querySelectorAll("[data-ack]").forEach(btn => btn.onclick = async () => {
-      await updateDoc(doc(db,"families",FAMILY_ID,"alerts",btn.dataset.ack), {
-        acknowledged:true,
-        acknowledgedAt:serverTimestamp(),
-        acknowledgedBy:state.roleKey || null
-      });
-      toast("Alert acknowledged.");
+      const restore = setBusy(btn, "Acking…");
+      await updateDoc(doc(db,"families",FAMILY_ID,"alerts",btn.dataset.ack),{ acknowledged:true, acknowledgedAt:serverTimestamp(), acknowledgedBy:state.user?.uid||null });
+      restore(); toast("Alert acknowledged.");
     });
   });
-  activeUnsubs.push(unsubAlerts);
+
+  // Load timeline
+  loadRecentTimeline();
+  // Load courage summary
+  loadCourageSummary();
+  // Load pattern summary
+  loadPatternSummary();
 }
 
-// Auth handled by passcode system
+async function loadRecentTimeline(){
+  const card = document.getElementById("timelineCard");
+  if(!card) return;
+  try{
+    const childPath = name => collection(db,"families",FAMILY_ID,"children",CHILD_ID,name);
+    const [gSnap, mSnap, iSnap, dSnap, aSnap] = await Promise.all([
+      getDocs(query(childPath("glucoseLogs"),  orderBy("createdAt","desc"), limit(5))),
+      getDocs(query(childPath("mealLogs"),     orderBy("createdAt","desc"), limit(5))),
+      getDocs(query(childPath("insulinLogs"),  orderBy("createdAt","desc"), limit(5))),
+      getDocs(query(childPath("diaryEntries"), orderBy("createdAt","desc"), limit(5))),
+      getDocs(query(collection(db,"families",FAMILY_ID,"alerts"), orderBy("createdAt","desc"), limit(5)))
+    ]);
 
-// ── SESSION RESTORE ON APP LOAD ──────────────────
-(async function init(){
-  await ensureFirebaseAuth();
-  const savedRole = localStorage.getItem("scarletRoleKey");
-  const savedRoleType = localStorage.getItem("scarletRole");
-  const validRole = savedRole && ROLES[savedRole] && roleType(savedRole) === savedRoleType;
-  if(validRole){
-    // Restore session from localStorage
-    state.authenticated = true;
-    state.roleKey = savedRole;
-    state.role = savedRoleType;
-    await safeEnsureDefaults();
+    const events = [];
+    gSnap.docs.forEach(d => { const dat = d.data(); events.push({ type:dat.context||"glucose", label:`Glucose logged${dat.glucose?" — "+dat.glucose+" mg/dL":""}`, dot:dat.context==="low_sugar"?"low":dat.context==="high_sugar"?"high":"glucose", ts:dat.createdAt }); });
+    mSnap.docs.forEach(d => { const dat = d.data(); events.push({ type:"meal", label:`Meal logged — ${dat.totalCarbs||0}g carbs (${esc(dat.mealType||"meal")})`, dot:"meal", ts:dat.createdAt }); });
+    iSnap.docs.forEach(d => { const dat = d.data(); events.push({ type:"insulin", label:`Insulin logged — ${dat.dose} units ${esc(dat.insulinType||"")}`, dot:"insulin", ts:dat.createdAt }); });
+    dSnap.docs.forEach(d => { const dat = d.data(); events.push({ type:"diary", label:`Scarlet Entry — mood: ${esc(dat.mood||"")}`, dot:"diary", ts:dat.createdAt }); });
+    aSnap.docs.forEach(d => { const dat = d.data(); events.push({ type:"alert", label:`Alert — ${esc(dat.type||"")}`, dot:"alert", ts:dat.createdAt }); });
+
+    events.sort((a,b) => {
+      const ta = a.ts?.toDate ? a.ts.toDate() : new Date(0);
+      const tb = b.ts?.toDate ? b.ts.toDate() : new Date(0);
+      return tb - ta;
+    });
+
+    if(!events.length){ card.innerHTML = `<div class="empty-state"><p>No care events logged yet.</p></div>`; return; }
+    card.innerHTML = `<div class="list">${events.slice(0,12).map(e => `
+      <div class="timeline-item">
+        <div class="timeline-dot ${e.dot}"></div>
+        <div class="timeline-content">
+          <strong>${esc(e.label)}</strong>
+          <span>${fmtDate(e.ts)}</span>
+        </div>
+      </div>`).join("")}</div>`;
+  }catch(err){
+    console.error(err);
+    if(card) card.innerHTML = `<div class="empty-state"><p>Timeline could not load.</p></div>`;
+  }
+}
+
+async function loadCourageSummary(){
+  const card = document.getElementById("courageCard");
+  if(!card) return;
+  try{
+    const bSnap = await getDocs(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"badgeUnlocks"));
+    const dSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"diaryEntries"), limit(200)));
+    const aSnap = await getDocs(query(collection(db,"families",FAMILY_ID,"alerts"), limit(200)));
+
+    const badgeCount   = bSnap.size;
+    const diaryCount   = dSnap.size;
+    const helpCount    = aSnap.docs.filter(d => d.data().type === "circle_call").length;
+    const safetyCount  = aSnap.docs.filter(d => ["low_alert","stacking_warning","high_symptoms","ketones_moderate_large"].includes(d.data().type)).length;
+
+    const latestBadge = bSnap.docs.sort((a,b) => {
+      const ta = a.data().createdAt?.toDate ? a.data().createdAt.toDate() : new Date(0);
+      const tb = b.data().createdAt?.toDate ? b.data().createdAt.toDate() : new Date(0);
+      return tb - ta;
+    })[0]?.data();
+
+    card.innerHTML = `
+      <div class="courage-grid">
+        <div class="courage-stat"><div class="n">${badgeCount}</div><div class="l">Badges earned</div></div>
+        <div class="courage-stat"><div class="n">${diaryCount}</div><div class="l">Diary entries</div></div>
+        <div class="courage-stat"><div class="n">${helpCount}</div><div class="l">Help requests</div></div>
+        <div class="courage-stat"><div class="n">${safetyCount}</div><div class="l">Safety steps</div></div>
+        <div class="courage-stat" style="grid-column:span 2"><div class="n" style="font-size:14px;color:var(--gold)">${latestBadge ? esc(latestBadge.name) : "No badges yet"}</div><div class="l">Latest badge</div></div>
+      </div>
+      <p class="small muted" style="margin-top:12px;font-style:italic">"Celebrate effort, not perfect glucose."</p>`;
+  }catch(err){
+    if(card) card.innerHTML = `<div class="empty-state"><p>Courage summary could not load.</p></div>`;
+  }
+}
+
+async function loadPatternSummary(){
+  const card = document.getElementById("patternCard");
+  if(!card) return;
+  try{
+    const childPath = name => collection(db,"families",FAMILY_ID,"children",CHILD_ID,name);
+    const [gSnap, mSnap, iSnap] = await Promise.all([
+      getDocs(query(childPath("glucoseLogs"),  orderBy("createdAt","desc"), limit(100))),
+      getDocs(query(childPath("mealLogs"),     orderBy("createdAt","desc"), limit(100))),
+      getDocs(query(childPath("insulinLogs"),  orderBy("createdAt","desc"), limit(100)))
+    ]);
+    const lows  = gSnap.docs.filter(d => d.data().context === "low_sugar").length;
+    const highs = gSnap.docs.filter(d => d.data().context === "high_sugar").length;
+    card.innerHTML = `
+      <div class="report-grid">
+        <div class="report-stat"><div class="stat-num">${gSnap.size}</div><div class="stat-label">Total glucose logs</div></div>
+        <div class="report-stat"><div class="stat-num">${mSnap.size}</div><div class="stat-label">Total meal logs</div></div>
+        <div class="report-stat"><div class="stat-num">${iSnap.size}</div><div class="stat-label">Total insulin logs</div></div>
+        <div class="report-stat"><div class="stat-num" style="color:#e74c3c">${lows}</div><div class="stat-label">Low events</div></div>
+        <div class="report-stat"><div class="stat-num" style="color:#e67e22">${highs}</div><div class="stat-label">High events</div></div>
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn scarlet full" id="openFullReportsBtn">Open Full Reports</button>
+      </div>`;
+    const openBtn = document.getElementById("openFullReportsBtn");
+    if(openBtn) openBtn.onclick = () => renderReportsData();
+  }catch(err){
+    if(card) card.innerHTML = `<div class="empty-state"><p>Pattern data could not load.</p></div>`;
+  }
+}
+
+function renderAdultVaultSummary(){
+  $app.innerHTML = `
+    <div class="screen">
+      <div class="topbar">
+        <div class="logo-lockup">
+          <div class="logo-small"><span>SD</span></div>
+          <div class="topbar-title"><strong>Scarlet Vault</strong><p class="small muted">Amara's courage marks</p></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="build-tag">${BUILD}</span>
+          <button class="btn secondary" id="backFromAdultVault">← Back</button>
+        </div>
+      </div>
+      <div class="vault-summary">
+        <div class="vault-count">${state.unlockedBadges.size}</div>
+        <div class="vault-label">proofs of courage</div>
+        <p class="vault-quote">Amara earned every one of these by checking, telling the truth, asking for help, and staying.</p>
+      </div>
+      <div class="card">
+        <h3>All Badges</h3>
+        <div class="badge-grid" style="margin-top:12px">
+          ${BADGES.map(b => {
+            const unlocked = state.unlockedBadges.has(b.id);
+            return `
+              <div class="badge-card ${unlocked?"unlocked":"locked"}">
+                <div class="badge-seal"><span>${unlocked?"✦":"◌"}</span></div>
+                <h3>${esc(b.name)}</h3>
+                <p class="badge-desc">${unlocked ? esc(b.subtitle) : "Not yet earned"}</p>
+                <p class="badge-rule">${esc(b.rule)}</p>
+              </div>`;
+          }).join("")}
+        </div>
+      </div>
+    </div>`;
+  bindGlobal();
+  document.getElementById("backFromAdultVault").onclick = () => renderAdult();
+}
+
+// ── AUTH STATE LISTENER ───────────────────────────────────────
+onAuthStateChanged(auth, async user => {
+  const justLoggedIn = sessionStorage.getItem("scarletJustLoggedIn") === "yes";
+  if(state.loginInProgress || state.pendingRepair) return;
+  if(user && justLoggedIn){
+    state.user = user;
+    state.role = localStorage.getItem("scarletRole") || "child";
     await loadData();
-    state.moodCheckedThisSession = false;
-    if(!maybeStartChildMoodCheck("open")) render();
-  } else {
-    localStorage.removeItem("scarletRole");
-    localStorage.removeItem("scarletRoleKey");
+    render();
+  }else{
+    if(user) await signOut(auth);
+    state.user = null; state.role = null;
     renderLogin();
-  }
-})();
-
-document.addEventListener("visibilitychange", () => {
-  if(document.visibilityState === "hidden"){
-    lastHiddenAt = Date.now();
-  }
-  if(document.visibilityState === "visible" && state.authenticated && state.role === "child"){
-    const hiddenLongEnough = lastHiddenAt && (Date.now() - lastHiddenAt > 10 * 60 * 1000);
-    if(hiddenLongEnough){
-      state.moodCheckedThisSession = false;
-      maybeStartChildMoodCheck("resume");
-    }
   }
 });

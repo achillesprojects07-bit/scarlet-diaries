@@ -1,54 +1,144 @@
 rules_version = '2';
 
-// ════════════════════════════════════════════════════════════════════
-// THE SCARLET DIARIES — Firestore Security Rules (V5)
-//
-// TIER 1 (these rules, works today):
-//   Every read/write requires a Firebase Auth session. The app signs in
-//   anonymously on launch, so the family is unaffected — but raw API
-//   scraping without an auth handshake is blocked, and you can monitor
-//   and revoke sessions from the Firebase Console.
-//
-// TIER 2 (the real fix — see SETUP.md "Going further"):
-//   Replace anonymous auth with email/password accounts for the four
-//   family members, then replace `isSignedIn()` below with
-//   `isFamily()` so ONLY your four accounts can touch the data.
-// ════════════════════════════════════════════════════════════════════
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() {
+    function signedIn() {
       return request.auth != null;
     }
 
-    // TIER 2: uncomment and use instead of isSignedIn() once the four
-    // family email accounts exist in Firebase Authentication.
-    // function isFamily() {
-    //   return request.auth != null &&
-    //     request.auth.token.email in [
-    //       'mom@example.com',
-    //       'dad@example.com',
-    //       'tita@example.com',
-    //       'amara@example.com'
-    //     ];
-    // }
-
-    // Family data: settings, logs, foods, badges, alerts, passcodes
-    match /families/{familyId}/{document=**} {
-      allow read, write: if isSignedIn();
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
-    // Outgoing email queue for the Trigger Email extension.
-    // The app only needs to CREATE mail docs — never read or edit them.
-    match /mail/{mailId} {
-      allow create: if isSignedIn();
-      allow read, update, delete: if false;
+    function hasUserDoc() {
+      return signedIn() && exists(userPath());
     }
 
-    // Everything else: denied.
-    match /{document=**} {
-      allow read, write: if false;
+    function userDoc() {
+      return get(userPath());
+    }
+
+    function sameFamily(familyId) {
+      return hasUserDoc() && userDoc().data.familyId == familyId;
+    }
+
+    function isAdult() {
+      return hasUserDoc() && userDoc().data.role == "adult";
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // User profile bootstrap.
+    // A newly authenticated user may create only their own user document.
+    match /users/{userId} {
+      allow create: if isSelf(userId)
+        && request.resource.data.familyId is string
+        && request.resource.data.role in ["child", "adult"]
+        && request.resource.data.roleKey in ["amara", "mom", "dad", "tita"]
+        && request.resource.data.email is string;
+
+      allow read: if isSelf(userId);
+
+      allow update: if isSelf(userId)
+        && request.resource.data.familyId == resource.data.familyId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.roleKey == resource.data.roleKey;
+
+      allow delete: if false;
+    }
+
+    match /families/{familyId} {
+      allow read: if sameFamily(familyId);
+      allow create: if isAdult() && sameFamily(familyId);
+      allow update, delete: if isAdult() && sameFamily(familyId);
+
+      match /foodLibrary/{foodId} {
+        allow read: if sameFamily(familyId);
+        allow create: if sameFamily(familyId);
+        allow update, delete: if sameFamily(familyId);
+      }
+
+      match /badges/{badgeId} {
+        allow read: if sameFamily(familyId);
+        allow create: if sameFamily(familyId);
+        allow update, delete: if isAdult() && sameFamily(familyId);
+      }
+
+      match /alerts/{alertId} {
+        allow read, create: if sameFamily(familyId);
+        allow update: if sameFamily(familyId);
+        allow delete: if isAdult() && sameFamily(familyId);
+      }
+
+      match /children/{childId} {
+        allow read: if sameFamily(familyId);
+        allow create: if sameFamily(familyId);
+        allow update, delete: if isAdult() && sameFamily(familyId);
+
+        match /settings/{settingId} {
+          allow read: if sameFamily(familyId);
+          allow create: if sameFamily(familyId);
+          allow update, delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /mealLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /glucoseLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /insulinLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /ketoneLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /symptomLogs/{logId} {
+          allow read, create: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /diaryEntries/{entryId} {
+          allow create: if sameFamily(familyId);
+          allow read: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /moodLogs/{logId} {
+          allow create: if sameFamily(familyId);
+          allow read: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /badgeUnlocks/{badgeId} {
+          allow read, create: if sameFamily(familyId);
+          allow update: if false;
+          allow delete: if isAdult() && sameFamily(familyId);
+        }
+
+        match /reports/{reportId} {
+          allow read, create: if sameFamily(familyId);
+          allow update, delete: if isAdult() && sameFamily(familyId);
+        }
+      }
     }
   }
 }
