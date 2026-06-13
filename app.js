@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID  = "amara";
 const APP_NAME  = "The Scarlet Diaries";
-const BUILD     = "V2.6.6";
+const BUILD     = "V2.6.7";
 const CIRCLE    = ["Mom", "Dad", "Tita"];
 const DEMO_PIN = "1111";
 const ROLE_AUTH_ACCOUNTS = {
@@ -524,6 +524,143 @@ const CHECKIN_NEXTSTEPS = [
 
 function randItem(arr){ return arr[Math.floor(Math.random() * arr.length)]; }
 
+
+
+BADGES.push(
+  { id:"plate-builder",     section:"Food Confidence", name:"The Plate Builder",     subtitle:"You built a meal with intention.",             desc:"You used the visual meal builder to build a real plate. That is nutritional awareness that lasts a lifetime.",  rule:"Build a plate with all three zones filled." },
+  { id:"veggie-champion",   section:"Food Confidence", name:"Veggie Champion",        subtitle:"You remembered what the green zone does.",    desc:"Adding vegetables to a meal changes how your body handles the carbs. You made that choice.",                    rule:"Add vegetables to any meal." },
+  { id:"protein-protector", section:"Food Confidence", name:"Protein Protector",      subtitle:"You gave your sugar something to hold onto.", desc:"Adding protein to a meal helps your glucose stay steadier. You made that choice.",                              rule:"Add protein to any meal." },
+  { id:"balance-keeper",    section:"Food Confidence", name:"The Balance Keeper",     subtitle:"All three zones. One plate. One Amara.",      desc:"A balanced plate — vegetables, carbs, and protein. Your body noticed.",                                           rule:"Build a fully balanced plate." },
+  { id:"carb-aware",        section:"Food Confidence", name:"Carb Aware",             subtitle:"You know what is on the plate before it hits.",desc:"You checked your carb total before eating. That is expert-level self-care.",                                  rule:"Complete any plate build with carb total visible." }
+);
+
+// ── V2.6.7 VISUAL MEAL BUILDER FOUNDATION ───────────────────
+const BALANCE_OBSERVATIONS = {
+  highCarb: [
+    "That is a big carb load for one meal. The Apidra estimate will reflect it. An adult should check.",
+    "Lots of carbs on this plate. Adding protein or vegetables can help the sugar rise more steadily.",
+    "High carb meal ahead. That happens. The estimate accounts for it, and adult confirmation matters."
+  ],
+  lowCarb: [
+    "Not many carbs here. Your body needs fuel. Is there something small you can add?",
+    "This plate is light on carbs. That is okay sometimes — just make sure you have enough energy.",
+    "Very few carbs in this meal. The Apidra suggestion may be very small or zero. An adult should check."
+  ],
+  missingProtein: [
+    "No protein yet on this plate. Protein helps keep sugar steadier after eating.",
+    "This plate does not have protein yet. Even a small amount helps slow the carbs down.",
+    "Protein is missing here. Fish, egg, chicken, cheese, or yogurt all work."
+  ],
+  missingVeg: [
+    "No vegetables yet. If they are available, even a small amount helps the meal work better.",
+    "Vegetable zone is empty. Tomato, cucumber, greens, or soup vegetables can help.",
+    "No vegetable foods yet. They are not required, but they can slow how fast carbs rise."
+  ],
+  balanced: [
+    "That is a well-built plate, Amara. Carbs, protein, and vegetables are all here.",
+    "All three zones are filled. That is a plate to be proud of.",
+    "Good balance on this plate. Your body has a clearer picture of what is coming."
+  ]
+};
+
+const VISUAL_MEAL_BUILDERS = [
+  {
+    id:"rice", name:"Rice", type:"count", openingPrompt:"How much rice do you have?",
+    hiddenCarbAlert:"A restaurant or carinderia scoop can be bigger than one cup. Count carefully.",
+    components:[
+      { id:"rice-quarter", name:"Quarter cup", portion:"1/4 cup", carbs:11, protein:1, fat:0, fiber:0.2, zone:"carb", bodyRef:"Small cupped hand", svg:"rice", countable:true, max:8 },
+      { id:"rice-half", name:"Half cup", portion:"1/2 cup", carbs:22, protein:2, fat:0, fiber:0.3, zone:"carb", bodyRef:"Cupped hand", svg:"rice", countable:true, max:4 },
+      { id:"rice-one", name:"One cup", portion:"1 cup", carbs:45, protein:4, fat:0.5, fiber:0.6, zone:"carb", bodyRef:"Closed fist", svg:"rice", countable:true, max:3 }
+    ]
+  },
+  {
+    id:"sinigang", name:"Sinigang", type:"bowl", openingPrompt:"Sinigang is different every time. Count what is actually in your bowl.",
+    hiddenCarbAlert:"Gabi in sinigang carries about 10g carbs per piece. Count every piece you can see.",
+    components:[
+      { id:"sinigang-broth", name:"Broth", portion:"1 cup", carbs:2, protein:1, fat:0, fiber:0, zone:"vegetable", bodyRef:"One fist of liquid", svg:"broth", countable:false },
+      { id:"pork-ribs-sinigang", name:"Pork ribs", portion:"1 piece", carbs:0, protein:12, fat:8, fiber:0, zone:"protein", bodyRef:"Two fingers wide", svg:"pork-rib", countable:true, max:5 },
+      { id:"shrimp-sinigang", name:"Shrimp", portion:"4 pieces", carbs:0, protein:16, fat:1, fiber:0, zone:"protein", bodyRef:"Four fingers", svg:"shrimp", countable:true, max:5 },
+      { id:"kangkong-sinigang", name:"Kangkong", portion:"1 cup", carbs:3, protein:3, fat:0, fiber:2, zone:"vegetable", bodyRef:"Closed fist", svg:"leafy", countable:false },
+      { id:"sitaw-sinigang", name:"Sitaw", portion:"5 pieces", carbs:4, protein:1, fat:0, fiber:1.5, zone:"vegetable", bodyRef:"Five fingers long", svg:"beans", countable:true, max:4 },
+      { id:"gabi-sinigang", name:"Gabi", portion:"1 piece", carbs:10, protein:1, fat:0, fiber:1, zone:"carb", bodyRef:"Small closed fist", svg:"taro", countable:true, max:4, hiddenCarbFlag:true },
+      { id:"tomato-sinigang", name:"Tomato", portion:"1 piece", carbs:3, protein:1, fat:0, fiber:0.5, zone:"vegetable", bodyRef:"One small tomato", svg:"tomato", countable:true, max:3 }
+    ]
+  },
+  {
+    id:"tinola", name:"Tinola", type:"bowl", openingPrompt:"Tinola has different vegetables every time. Count what is actually in your bowl.",
+    hiddenCarbAlert:"Green papaya and sayote both carry carbs. That is where carbs can hide in tinola.",
+    components:[
+      { id:"tinola-broth", name:"Broth", portion:"1 cup", carbs:1, protein:2, fat:1, fiber:0, zone:"vegetable", bodyRef:"One fist of liquid", svg:"broth", countable:false },
+      { id:"chicken-thigh-t", name:"Chicken thigh", portion:"1 piece", carbs:0, protein:22, fat:8, fiber:0, zone:"protein", bodyRef:"Palm of hand", svg:"chicken", countable:true, max:4 },
+      { id:"chicken-drum-t", name:"Chicken drumstick", portion:"1 piece", carbs:0, protein:15, fat:6, fiber:0, zone:"protein", bodyRef:"Two fingers wide", svg:"drumstick", countable:true, max:4 },
+      { id:"papaya-tinola", name:"Green papaya", portion:"1/2 cup", carbs:5, protein:0.5, fat:0, fiber:1, zone:"carb", bodyRef:"Cupped hand", svg:"papaya", countable:false, hiddenCarbFlag:true },
+      { id:"sayote-tinola", name:"Sayote", portion:"1 piece", carbs:8, protein:1, fat:0, fiber:1.5, zone:"carb", bodyRef:"Closed fist", svg:"chayote", countable:true, max:3, hiddenCarbFlag:true },
+      { id:"malunggay-tinola", name:"Malunggay", portion:"1/2 cup", carbs:2, protein:2, fat:0, fiber:1, zone:"vegetable", bodyRef:"Cupped hand", svg:"leafy", countable:false }
+    ]
+  },
+  {
+    id:"adobo", name:"Adobo", type:"plate", openingPrompt:"Let's count the pieces of adobo on your plate.",
+    hiddenCarbAlert:"If there is potato in the adobo, each piece adds about 15g carbs.",
+    components:[
+      { id:"chicken-thigh-a", name:"Chicken thigh", portion:"1 piece", carbs:1, protein:22, fat:9, fiber:0, zone:"protein", bodyRef:"Palm of hand", svg:"chicken", countable:true, max:4 },
+      { id:"pork-belly-a", name:"Pork belly", portion:"1 piece", carbs:1, protein:12, fat:16, fiber:0, zone:"protein", bodyRef:"Palm sized flat", svg:"pork", countable:true, max:4 },
+      { id:"adobo-sauce-2tbsp", name:"Sauce", portion:"2 tbsp", carbs:4, protein:1, fat:2, fiber:0, zone:"mixed", bodyRef:"Two thumbs", svg:"sauce", countable:false },
+      { id:"egg-adobo", name:"Boiled egg", portion:"1 whole", carbs:0.5, protein:6, fat:5, fiber:0, zone:"protein", bodyRef:"Closed fist loosely", svg:"egg", countable:true, max:3 },
+      { id:"potato-adobo", name:"Potato", portion:"1 piece", carbs:15, protein:2, fat:0, fiber:1.5, zone:"carb", bodyRef:"Closed fist", svg:"potato", countable:true, max:3, hiddenCarbFlag:true }
+    ]
+  },
+  {
+    id:"mcdo-burger", name:"McDonald's Burger", type:"stack", openingPrompt:"Build your burger exactly the way it comes.",
+    hiddenCarbAlert:"The bun is where most carbs are. The patty is almost zero carbs.",
+    components:[
+      { id:"mcdo-bottom-bun", name:"Bottom bun", portion:"1 half", carbs:13, protein:2.5, fat:2, fiber:0.5, zone:"carb", bodyRef:"Palm sized round", svg:"bun-bottom", countable:false, required:true },
+      { id:"mcdo-patty", name:"Beef patty", portion:"1 patty", carbs:1, protein:8, fat:6, fiber:0, zone:"protein", bodyRef:"Palm sized flat", svg:"patty", countable:false, required:true },
+      { id:"mcdo-ketchup", name:"Ketchup", portion:"1 packet", carbs:4, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"Thumb tip squeeze", svg:"ketchup", countable:false },
+      { id:"mcdo-top-bun", name:"Top bun", portion:"1 half", carbs:13, protein:2.5, fat:2, fiber:0.5, zone:"carb", bodyRef:"Palm sized round", svg:"bun-top", countable:false, required:true }
+    ]
+  },
+  {
+    id:"mcdo-nuggets", name:"McDonald's Nuggets", type:"count", openingPrompt:"Count your nuggets. Tap to add them one by one.",
+    hiddenCarbAlert:"Each nugget has carbs from the breading. Dipping sauce adds more.",
+    components:[
+      { id:"mcdo-nugget", name:"Nugget", portion:"1 piece", carbs:3, protein:4, fat:3, fiber:0, zone:"mixed", bodyRef:"Two fingers", svg:"nugget", countable:true, max:20 },
+      { id:"mcdo-sauce-bbq", name:"Barbecue sauce", portion:"1 packet", carbs:12, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"Thumb sized packet", svg:"sauce-packet", countable:true, max:3 }
+    ]
+  },
+  {
+    id:"mcdo-fries", name:"McDonald's Fries", type:"count", openingPrompt:"Which size did you get?",
+    hiddenCarbAlert:"A large fries can carry more carbs than a cup of rice. Choose the size carefully.",
+    components:[
+      { id:"mcdo-fries-small", name:"Small fries", portion:"1 serving", carbs:29, protein:3, fat:11, fiber:3, zone:"carb", bodyRef:"Cupped hand loosely", svg:"fries-small", countable:false },
+      { id:"mcdo-fries-medium", name:"Medium fries", portion:"1 serving", carbs:44, protein:4, fat:16, fiber:4, zone:"carb", bodyRef:"Closed fist loosely", svg:"fries-medium", countable:false },
+      { id:"mcdo-fries-large", name:"Large fries", portion:"1 serving", carbs:66, protein:6, fat:24, fiber:6, zone:"carb", bodyRef:"Closed fist overflowing", svg:"fries-large", countable:false }
+    ]
+  },
+  {
+    id:"greek-yogurt", name:"Greek Yogurt", type:"pour", openingPrompt:"Build your yogurt bowl.",
+    hiddenCarbAlert:"Plain Greek yogurt is low carb. The carbs come from honey, fruit, or granola.",
+    components:[
+      { id:"yogurt-half", name:"Yogurt half cup", portion:"1/2 cup", carbs:3, protein:9, fat:0.5, fiber:0, zone:"protein", bodyRef:"Cupped hand", svg:"yogurt", countable:false },
+      { id:"greek-honey-tsp", name:"Honey small", portion:"1 tsp", carbs:6, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"Thumb tip", svg:"honey", countable:true, max:3 },
+      { id:"yogurt-banana", name:"Banana slices", portion:"1/2 banana", carbs:13, protein:0.5, fat:0, fiber:1.5, zone:"carb", bodyRef:"Half palm length", svg:"banana", countable:true, max:2 },
+      { id:"yogurt-strawberry", name:"Strawberries", portion:"5 pieces", carbs:9, protein:1, fat:0, fiber:2, zone:"carb", bodyRef:"Five thumb sized", svg:"berries", countable:true, max:3 },
+      { id:"yogurt-granola", name:"Granola", portion:"2 tbsp", carbs:14, protein:2, fat:3, fiber:1, zone:"carb", bodyRef:"Two thumbs", svg:"granola", countable:true, max:3 }
+    ]
+  },
+  {
+    id:"drinks", name:"Drinks", type:"pour", openingPrompt:"What are you drinking with this meal?",
+    hiddenCarbAlert:"Drinks carry carbs that are easy to forget. Juice, milk, and soft drinks all count. Water is free.",
+    components:[
+      { id:"water", name:"Water", portion:"any", carbs:0, protein:0, fat:0, fiber:0, zone:"vegetable", bodyRef:"Any size", svg:"water", countable:false },
+      { id:"milk-full", name:"Milk full cup", portion:"1 cup", carbs:12, protein:8, fat:5, fiber:0, zone:"protein", bodyRef:"Closed fist of liquid", svg:"milk", countable:false },
+      { id:"juice-box", name:"Juice box", portion:"1 box", carbs:20, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"One small box", svg:"juice-box", countable:true, max:2 },
+      { id:"coke-can", name:"Soft drink can", portion:"1 can", carbs:39, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"One can", svg:"can", countable:true, max:2 }
+    ]
+  }
+];
+
+function getMealBuilder(id){ return VISUAL_MEAL_BUILDERS.find(b => b.id === id); }
+
 // ── APP STATE ────────────────────────────────────────────────
 let state = {
   user:            null,
@@ -540,7 +677,7 @@ let state = {
   view:            "home",
   foodCategory:    "All",
   foodSearch:      "",
-  meal: { type:null, glucose:null, items:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" },
+  meal: { type:null, glucose:null, items:[], plateDishes:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" },
   highFlow: { glucose:null, ketones:null, symptoms:[], recentApidra:null },
   lowFlow:  { glucose:null, fastSugar:null, adult:null, recheck:null },
   checkinCheckedToday:false
@@ -708,7 +845,7 @@ function renderLogin(){
         <div class="header brand-header">
           <img class="brand-logo-main" src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" />
           <div class="sr-only">The Scarlet Diaries</div>
-          <div class="tagline">Every drop. Every breath. Unstoppable.</div>
+          <div class="tagline">Every drop. Every page. Unstoppable.</div>
           <div class="build-tag">${BUILD}</div>
         </div>
         <div class="login-card">
@@ -769,7 +906,7 @@ function renderProfileRepair(){
         <div class="header brand-header">
           <img class="brand-logo-main" src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" />
           <div class="sr-only">The Scarlet Diaries</div>
-          <div class="tagline">Every drop. Every breath. Unstoppable.</div>
+          <div class="tagline">Every drop. Every page. Unstoppable.</div>
           <div class="build-tag">${BUILD}</div>
         </div>
         <div class="login-card">
@@ -943,7 +1080,7 @@ function layout(content, active="home"){
           <div class="logo-small brand-mark"><img src="./assets/scarlet-diaries-header.png" alt="The Scarlet Diaries" /></div>
           <div class="topbar-title">
             <strong>The Scarlet Diaries</strong>
-            <p class="small muted">Every drop. Every breath. Unstoppable.</p>
+            <p class="small muted">Every drop. Every page. Unstoppable.</p>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -1195,7 +1332,7 @@ function renderHome(){
 }
 // ── MEAL FLOW ────────────────────────────────────────────────
 function renderMealStart(){
-  state.meal = { type:null, glucose:null, items:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" };
+  state.meal = { type:null, glucose:null, items:[], plateDishes:[], hiddenChecked:false, ketones:null, lastApidra:"unknown" };
   layout(`
     <div class="card">
       <h2>Before I Eat</h2>
@@ -1258,7 +1395,318 @@ function renderKetonePrompt(next="meal"){
   });
 }
 
+
+function ensurePlateState(){
+  if(!Array.isArray(state.meal.plateDishes)) state.meal.plateDishes = [];
+  if(!Array.isArray(state.meal.items)) state.meal.items = [];
+}
+
+function computePlateData(){
+  ensurePlateState();
+  const dishes = state.meal.plateDishes.map(d => ({
+    dishName:d.dishName,
+    dishType:d.dishType,
+    components:(d.components||[]).map(c => ({
+      id:c.id, name:c.name, portion:c.portion, carbs:Number(c.carbs||0),
+      protein:Number(c.protein||0), fat:Number(c.fat||0), fiber:Number(c.fiber||0), zone:c.zone||"mixed"
+    }))
+  }));
+  const all = dishes.flatMap(d => d.components);
+  const vegetableZoneFoods = all.filter(c => c.zone === "vegetable").map(c => c.name);
+  const carbZoneFoods      = all.filter(c => c.zone === "carb").map(c => c.name);
+  const proteinZoneFoods   = all.filter(c => c.zone === "protein").map(c => c.name);
+  const totalCarbs   = all.reduce((s,c) => s + Number(c.carbs||0), 0);
+  const totalProtein = all.reduce((s,c) => s + Number(c.protein||0), 0);
+  const totalFat     = all.reduce((s,c) => s + Number(c.fat||0), 0);
+  const totalFiber   = all.reduce((s,c) => s + Number(c.fiber||0), 0);
+  const hasProtein   = proteinZoneFoods.length > 0 || totalProtein >= 7;
+  const hasVegetables= vegetableZoneFoods.length > 0;
+  const carbsInRange = totalCarbs >= 15 && totalCarbs <= 75;
+  const isBalanced   = hasProtein && hasVegetables && carbsInRange;
+  const observations = [];
+  if(totalCarbs > 75) observations.push(randItem(BALANCE_OBSERVATIONS.highCarb));
+  if(totalCarbs > 0 && totalCarbs < 15) observations.push(randItem(BALANCE_OBSERVATIONS.lowCarb));
+  if(!hasProtein && totalCarbs > 0) observations.push(randItem(BALANCE_OBSERVATIONS.missingProtein));
+  if(!hasVegetables && totalCarbs > 0) observations.push(randItem(BALANCE_OBSERVATIONS.missingVeg));
+  if(isBalanced) observations.push(randItem(BALANCE_OBSERVATIONS.balanced));
+  return { dishes, vegetableZoneFoods, carbZoneFoods, proteinZoneFoods, totalCarbs, totalProtein, totalFat, totalFiber, hasProtein, hasVegetables, carbsInRange, isBalanced, observations:observations.slice(0,2) };
+}
+
 function renderFoodBuilder(){
+  ensurePlateState();
+  const plate = computePlateData();
+  layout(`
+    <div class="card dark visual-builder-intro">
+      <h2>Build your meal</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Tap a dish, build what is really there, then add it to your plate.</p>
+    </div>
+
+    <div class="card plate-mini">
+      <div class="plate-mini-top">
+        <h3>Your plate so far</h3>
+        <strong>${Math.round(plate.totalCarbs)}g carbs</strong>
+      </div>
+      ${state.meal.plateDishes.length ? `
+        <div class="dish-tags">
+          ${state.meal.plateDishes.map((d,i) => `<span>${esc(d.dishName)} <button data-remove-dish="${i}" aria-label="Remove ${esc(d.dishName)}">×</button></span>`).join("")}
+        </div>
+        <button class="btn scarlet full" id="viewPlateBtn">View plate and continue</button>
+      ` : `<p class="muted small">No dishes yet. Start with rice, soup, a drink, or one of Amara's usual foods.</p>`}
+    </div>
+
+    <div class="card">
+      <h3>Visual builders</h3>
+      <p class="small muted">Foundation set for V2.6.7. More foods can be added safely after this works.</p>
+      <div class="builder-grid">
+        ${VISUAL_MEAL_BUILDERS.map(b => `
+          <button class="builder-card" data-builder="${b.id}">
+            <span class="builder-icon">${builderIcon(b.type)}</span>
+            <strong>${esc(b.name)}</strong>
+            <em>${esc(builderTypeLabel(b.type))}</em>
+          </button>`).join("")}
+      </div>
+      <div class="body-ref-note">These are starting guides. As you grow, ask an adult to help you update them.</div>
+    </div>
+
+    <div class="card">
+      <h3>Need another food?</h3>
+      <p class="small muted">Use the original food search if the visual builder does not have this food yet.</p>
+      <button class="btn secondary full" id="classicFoodSearch">Use classic food search</button>
+    </div>`, "meal");
+
+  document.querySelectorAll("[data-builder]").forEach(btn => btn.onclick = () => renderDishBuilder(btn.dataset.builder));
+  document.querySelectorAll("[data-remove-dish]").forEach(btn => btn.onclick = () => {
+    const idx = Number(btn.dataset.removeDish);
+    state.meal.plateDishes.splice(idx,1);
+    rebuildMealItemsFromPlate();
+    toast("Removed from plate.");
+    renderFoodBuilder();
+  });
+  const viewBtn = document.getElementById("viewPlateBtn");
+  if(viewBtn) viewBtn.onclick = () => renderPlateView();
+  document.getElementById("classicFoodSearch").onclick = () => renderClassicFoodBuilder();
+}
+
+function builderIcon(type){
+  return ({ bowl:"🥣", stack:"🍔", plate:"🍽️", pour:"🥛", count:"🔢" })[type] || "🍽️";
+}
+function builderTypeLabel(type){
+  return ({ bowl:"bowl builder", stack:"stack builder", plate:"plate builder", pour:"pour builder", count:"count builder" })[type] || "builder";
+}
+
+function expandSelectedComponents(builder, selected){
+  const out = [];
+  builder.components.forEach(c => {
+    const n = Number(selected[c.id] || 0);
+    if(!n) return;
+    if(c.countable){
+      for(let i=0;i<n;i++) out.push({ ...c });
+    }else{
+      out.push({ ...c });
+    }
+  });
+  return out;
+}
+
+function renderBuilderSvg(builder, components){
+  const shapes = components.slice(0,24).map((c,i) => {
+    const x = 32 + (i%6)*38;
+    const y = 120 - Math.floor(i/6)*20;
+    const cls = `food-shape ${esc(c.zone||"mixed")}`;
+    const label = esc((c.name||"?").slice(0,1));
+    if(builder.type === "bowl") return `<g class="drop-in"><ellipse class="${cls}" cx="${x}" cy="${y}" rx="14" ry="8"></ellipse><text x="${x}" y="${y+4}">${label}</text></g>`;
+    if(builder.type === "stack") return `<g class="drop-in"><rect class="${cls}" x="80" y="${128-i*12}" width="120" height="10" rx="5"></rect></g>`;
+    if(builder.type === "pour") return `<g class="drop-in"><rect class="${cls}" x="${70+i*5}" y="${128-i*5}" width="100" height="12" rx="6"></rect></g>`;
+    return `<g class="drop-in"><circle class="${cls}" cx="${x}" cy="${y}" r="12"></circle><text x="${x}" y="${y+4}">${label}</text></g>`;
+  }).join("");
+  const empty = components.length ? "" : `<text class="builder-empty-text" x="140" y="90" text-anchor="middle">What is here today?</text>`;
+  if(builder.type === "bowl"){
+    return `<svg class="meal-svg bowl-svg" viewBox="0 0 280 170" role="img" aria-label="${esc(builder.name)} bowl">
+      <ellipse class="bowl-rim" cx="140" cy="122" rx="108" ry="30"></ellipse>
+      <path class="bowl-body" d="M42 120 Q140 190 238 120 Z"></path>
+      <ellipse class="broth-layer" cx="140" cy="124" rx="92" ry="22"></ellipse>
+      ${empty}${shapes}
+    </svg>`;
+  }
+  if(builder.type === "stack"){
+    return `<svg class="meal-svg stack-svg" viewBox="0 0 280 170" role="img" aria-label="${esc(builder.name)} stack">
+      <rect class="plate-shadow" x="45" y="140" width="190" height="16" rx="8"></rect>
+      ${empty}${shapes}
+    </svg>`;
+  }
+  if(builder.type === "pour"){
+    return `<svg class="meal-svg pour-svg" viewBox="0 0 280 170" role="img" aria-label="${esc(builder.name)} cup">
+      <path class="cup-shape" d="M88 45 H192 L176 150 H104 Z"></path>
+      ${empty}${shapes}
+    </svg>`;
+  }
+  return `<svg class="meal-svg plate-svg" viewBox="0 0 280 170" role="img" aria-label="${esc(builder.name)} plate">
+    <ellipse class="plate-base" cx="140" cy="110" rx="110" ry="45"></ellipse>
+    ${empty}${shapes}
+  </svg>`;
+}
+
+function renderDishBuilder(builderId){
+  const builder = getMealBuilder(builderId);
+  if(!builder) return renderFoodBuilder();
+  const selected = {};
+  builder.components.forEach(c => { if(c.required) selected[c.id] = 1; });
+
+  const draw = () => {
+    const selectedComponents = expandSelectedComponents(builder, selected);
+    const carbs = selectedComponents.reduce((s,c)=>s+Number(c.carbs||0),0);
+    const protein = selectedComponents.reduce((s,c)=>s+Number(c.protein||0),0);
+    const hidden = selectedComponents.find(c => c.hiddenCarbFlag);
+    $app.querySelector("#builderVisual").innerHTML = renderBuilderSvg(builder, selectedComponents);
+    $app.querySelector("#builderCarbs").textContent = `${Math.round(carbs)}g`;
+    $app.querySelector("#builderProtein").textContent = `${Math.round(protein)}g`;
+    $app.querySelector("#builderComponents").innerHTML = builder.components.map(c => {
+      const count = Number(selected[c.id] || 0);
+      return `<button class="component-chip ${count?"selected":""}" data-component="${c.id}">
+        <strong>${esc(c.name)} ${count ? `×${count}` : ""}</strong>
+        <span>${esc(c.portion)} · ${Number(c.carbs||0)}g carbs</span>
+        <small>${esc(c.bodyRef || "Starting guide")}</small>
+      </button>`;
+    }).join("");
+    $app.querySelector("#hiddenDiscovery").innerHTML = hidden ? `
+      <div class="discovery-card">
+        <strong>Discovery</strong>
+        <p>${esc(builder.hiddenCarbAlert)}</p>
+      </div>` : "";
+    const addBtn = $app.querySelector("#addDishToPlate");
+    addBtn.disabled = selectedComponents.length === 0;
+    addBtn.classList.toggle("pulse-gold", selectedComponents.length > 0);
+    $app.querySelectorAll("[data-component]").forEach(btn => btn.onclick = () => {
+      const c = builder.components.find(x => x.id === btn.dataset.component);
+      const current = Number(selected[c.id] || 0);
+      if(c.required) return toast(`${c.name} is part of this builder.`);
+      if(c.countable){
+        selected[c.id] = current >= Number(c.max||5) ? 0 : current + 1;
+      }else{
+        selected[c.id] = current ? 0 : 1;
+      }
+      draw();
+    });
+  };
+
+  layout(`
+    <div class="card dark">
+      <button class="btn secondary" id="backToBuilders">← Back to builders</button>
+      <h2 style="margin-top:12px">${esc(builder.name)}</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">${esc(builder.openingPrompt)}</p>
+    </div>
+    <div class="visual-builder-shell">
+      <div id="builderVisual"></div>
+      <div class="builder-live-totals">
+        <div><span>Carbs</span><strong id="builderCarbs">0g</strong></div>
+        <div><span>Protein</span><strong id="builderProtein">0g</strong></div>
+      </div>
+      <div id="hiddenDiscovery"></div>
+      <div class="component-scroll" id="builderComponents"></div>
+      <button class="btn scarlet full" id="addDishToPlate">Add to my plate</button>
+      <button class="btn secondary full" id="goPlateFromDish" style="margin-top:10px">View plate</button>
+    </div>`, "meal");
+
+  document.getElementById("backToBuilders").onclick = () => renderFoodBuilder();
+  document.getElementById("goPlateFromDish").onclick = () => renderPlateView();
+  document.getElementById("addDishToPlate").onclick = async () => {
+    const components = expandSelectedComponents(builder, selected);
+    if(!components.length) return toast("Add at least one thing first.");
+    state.meal.plateDishes.push({ dishName:builder.name, dishType:builder.type, components });
+    rebuildMealItemsFromPlate();
+    await unlockPlateBadges();
+    toast(`${builder.name} added to your plate.`);
+    renderPlateView();
+  };
+  draw();
+  scrollUp();
+}
+
+function rebuildMealItemsFromPlate(){
+  ensurePlateState();
+  state.meal.items = state.meal.plateDishes.flatMap(d => (d.components||[]).map(c => ({
+    name:`${d.dishName}: ${c.name}`,
+    category:"Visual Meal Builder",
+    portion:c.portion,
+    carbs:Number(c.carbs||0),
+    protein:Number(c.protein||0),
+    fat:Number(c.fat||0),
+    fiber:Number(c.fiber||0),
+    source:"Visual meal builder",
+    zone:c.zone||"mixed"
+  })));
+}
+
+async function unlockPlateBadges(){
+  const p = computePlateData();
+  await unlockBadge("carb-aware");
+  if(p.hasVegetables) await unlockBadge("veggie-champion");
+  if(p.hasProtein) await unlockBadge("protein-protector");
+  if(p.hasVegetables && p.hasProtein && p.carbZoneFoods.length) await unlockBadge("plate-builder");
+  if(p.isBalanced) await unlockBadge("balance-keeper");
+}
+
+function renderPlateView(){
+  ensurePlateState();
+  const p = computePlateData();
+  const vegCount = p.vegetableZoneFoods.length;
+  const carbCount= p.carbZoneFoods.length;
+  const proCount = p.proteinZoneFoods.length;
+  layout(`
+    <div class="card dark">
+      <button class="btn secondary" id="backToBuildersFromPlate">← Add or edit food</button>
+      <h2 style="margin-top:12px">Your Plate</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">This is a picture of the meal before Apidra is estimated.</p>
+    </div>
+    <div class="plate-zone-card">
+      <svg class="plate-circle" viewBox="0 0 220 220" role="img" aria-label="Balanced plate circle">
+        <circle cx="110" cy="110" r="96" class="plate-ring"></circle>
+        <path class="zone vegetable-zone" d="M110 14 A96 96 0 1 0 110 206 Z"></path>
+        <path class="zone carb-zone" d="M110 14 A96 96 0 0 1 206 110 L110 110 Z"></path>
+        <path class="zone protein-zone" d="M206 110 A96 96 0 0 1 110 206 L110 110 Z"></path>
+        <text x="63" y="108">Veg</text>
+        <text x="151" y="74">Carbs</text>
+        <text x="150" y="154">Protein</text>
+      </svg>
+      <div class="plate-total">${Math.round(p.totalCarbs)}g carbs</div>
+      <p class="small muted">The Continue button always works. This is learning, not judging.</p>
+    </div>
+
+    <div class="card">
+      <h3>Plate zones</h3>
+      ${zoneRow("Vegetables", vegCount, p.vegetableZoneFoods, "vegetable")}
+      ${zoneRow("Carbs", carbCount, p.carbZoneFoods, "carb", `${Math.round(p.totalCarbs)}g`)}
+      ${zoneRow("Protein", proCount, p.proteinZoneFoods, "protein")}
+    </div>
+
+    ${p.observations.length ? `<div class="observation-list">${p.observations.map(o => `<div class="observation-card"><button data-dismiss-obs>×</button><p>${esc(o)}</p></div>`).join("")}</div>` : ""}
+
+    <div class="grid single">
+      <button class="action" id="addMoreDish"><strong>Add more food</strong><span>Build another dish or drink.</span></button>
+      <button class="action scarlet" id="continueFromPlate"><strong>Continue</strong><span>Check hidden carbs, then show suggested Apidra.</span></button>
+    </div>`, "meal");
+  document.getElementById("backToBuildersFromPlate").onclick = () => renderFoodBuilder();
+  document.getElementById("addMoreDish").onclick = () => renderFoodBuilder();
+  document.getElementById("continueFromPlate").onclick = async () => {
+    await unlockPlateBadges();
+    renderHiddenCarbs();
+  };
+  document.querySelectorAll("[data-dismiss-obs]").forEach(b => b.onclick = () => b.closest(".observation-card")?.remove());
+  scrollUp();
+}
+
+function zoneRow(label, count, foods, cls, extra=""){
+  return `<div class="zone-row ${cls}">
+    <div>
+      <strong>${esc(label)}</strong>
+      <span>${foods.length ? esc(foods.slice(0,4).join(", ")) : "Nothing here yet"}</span>
+    </div>
+    <em>${extra || `${count} food${count===1?"":"s"}`}</em>
+  </div>`;
+}
+
+
+function renderClassicFoodBuilder(){
   const categories = ["All","Breakfast Favorites","Meal Favorites","Meals","Rice / Bread / Pasta","Snacks & Sweets","Drinks","Fruit","Sauces / Hidden Carbs","Search","Add Food"];
   const foodCarbs  = state.meal.items.reduce((s,x) => s + Number(x.carbs||0), 0);
   const hasFood    = state.meal.items.length > 0;
@@ -1587,21 +2035,24 @@ async function saveMealLog(extra={}){
   const correctionDose = getCorrection(Number(state.meal.glucose));
   const estimatedDose  = carbDose + correctionDose;
   const actualDose     = extra.actualDose ?? null;
+  const plateData      = computePlateData();
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"mealLogs"),{
     mealType:            state.meal.type,
     glucoseBeforeMeal:   Number(state.meal.glucose),
-    items:               state.meal.items.map(x => ({ name:x.name, portion:x.portion, carbs:Number(x.carbs||0), source:x.source||"" })),
+    items:               state.meal.items.map(x => ({ name:x.name, portion:x.portion, carbs:Number(x.carbs||0), source:x.source||"", zone:x.zone||"" })),
     totalCarbs:          carbs,
     carbDose, correctionDose, estimatedDose, actualDose,
     adultConfirmed:      !!extra.adultConfirmed,
     hiddenCarbsChecked:  !!state.meal.hiddenChecked,
     ketones:             state.meal.ketones||null,
+    plateData,
     alertLevel:          state.meal.glucose >= state.settings.urgentHighThreshold ? "red" : state.meal.glucose >= state.settings.highThreshold ? "orange" : "green",
     createdAt:           serverTimestamp(),
     enteredBy:           state.user.uid
   });
   await unlockBadge("scarlet-sentinel");
   await unlockBadge("feast-reader");
+  await unlockPlateBadges();
   if(extra.autoLogInsulin && actualDose){
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"insulinLogs"),{
       insulinType:"Apidra", dose:Number(actualDose),
@@ -1666,7 +2117,7 @@ function renderHighKetones(){
 }
 
 function renderHighSymptoms(){
-  const symptomList = ["Vomiting","Stomach pain","Very sleepy","Fast/deep breathing","Very thirsty","Confused","None of these"];
+  const symptomList = ["Vomiting","Stomach pain","Very sleepy","Fast/deep chest feeling","Very thirsty","Confused","None of these"];
   layout(`
     <div class="card warning">
       <h2>Any warning signs?</h2>
@@ -1689,7 +2140,7 @@ function renderHighSymptoms(){
   });
   document.getElementById("continueHighSymptoms").onclick = async () => {
     state.highFlow.symptoms = [...selected];
-    const severe = state.highFlow.symptoms.some(s => ["Vomiting","Stomach pain","Very sleepy","Fast/deep breathing","Confused"].includes(s));
+    const severe = state.highFlow.symptoms.some(s => ["Vomiting","Stomach pain","Very sleepy","Fast/deep chest feeling","Confused"].includes(s));
     if(severe){
       await createAlert("high_symptoms","red",`Amara logged high glucose ${state.highFlow.glucose} with symptoms: ${state.highFlow.symptoms.join(", ")}.`);
       return renderEmergency("High sugar with these symptoms needs adult help now.");
@@ -1976,7 +2427,7 @@ function renderInsulinLog(){
 
 // ── SYMPTOMS ─────────────────────────────────────────────────
 function renderSymptoms(){
-  const symptoms = ["Tired","Dizzy","Shaky","Hungry","Thirsty","Headache","Stomach pain","Vomiting","Sleepy","Fast breathing","Sad","Angry","Scared","I don't know"];
+  const symptoms = ["Tired","Dizzy","Shaky","Hungry","Thirsty","Headache","Stomach pain","Vomiting","Sleepy","Fast chest movement","Sad","Angry","Scared","I don't know"];
   layout(`
     <div class="card">
       <h2>I Don't Feel Well</h2>
@@ -1996,7 +2447,7 @@ function renderSymptoms(){
     const restore = setBusy(btn, "Saving symptoms…");
     const arr = [...selected];
     await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"symptomLogs"),{ symptoms:arr, createdAt:serverTimestamp(), enteredBy:state.user.uid });
-    const severe = arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast breathing"].includes(x));
+    const severe = arr.some(x => ["Stomach pain","Vomiting","Sleepy","Fast chest movement"].includes(x));
     if(severe){ await createAlert("symptoms","red",`Amara logged symptoms: ${arr.join(", ")}.`); }
     restore(); toast("Symptoms saved.");
     renderFlowDone({
@@ -2136,7 +2587,7 @@ function renderEmergency(message){
     <div class="card danger">
       <h2>Adult help needed now</h2>
       <p>${esc(message)}</p>
-      <p class="muted" style="margin-top:10px">Tell Mom, Dad, or Tita now. If vomiting, stomach pain, very sleepy, confused, or breathing fast/deep, adults should seek urgent medical help.</p>
+      <p class="muted" style="margin-top:10px">Tell Mom, Dad, or Tita now. If vomiting, stomach pain, very sleepy, confused, or chest moving fast/deep, adults should seek urgent medical help.</p>
       <button class="btn red full" id="alertCircle" style="margin-top:14px">Alert My Circle</button>
     </div>`, "home");
   document.getElementById("alertCircle").onclick = async () => {

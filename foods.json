@@ -222,43 +222,6 @@
     "confidence": "High"
   },
   {
-    "id": "champorado-breakfast-favorites",
-    "name": "Champorado",
-    "category": "Breakfast Favorites",
-    "portion": "1 cup",
-    "carbs": 52,
-    "calories": 260,
-    "portionOptions": [
-      {
-        "label": "1/2 cup",
-        "portion": "1/2 cup",
-        "carbs": 26
-      },
-      {
-        "label": "1 cup",
-        "portion": "1 cup",
-        "carbs": 52
-      },
-      {
-        "label": "1.5 cups",
-        "portion": "1.5 cups",
-        "carbs": 78
-      }
-    ],
-    "smallPortion": "1/2 cup",
-    "smallCarbs": 26,
-    "usualPortion": "1 cup",
-    "usualCarbs": 52,
-    "largePortion": "1.5 cups",
-    "largeCarbs": 78,
-    "tags": "amara favorite,rice,chocolate,breakfast",
-    "favorite": true,
-    "verified": true,
-    "active": true,
-    "source": "Family estimate",
-    "confidence": "Low"
-  },
-  {
     "id": "loukaniko-breakfast-favorites",
     "name": "Loukaniko",
     "category": "Breakfast Favorites",
@@ -1172,48 +1135,6 @@
     "confidence": "Medium"
   },
   {
-    "id": "lugaw-rice-porridge-rice-bread-pasta",
-    "name": "Lugaw / rice porridge",
-    "category": "Rice / Bread / Pasta",
-    "portion": "1/2 cup",
-    "carbs": 12,
-    "calories": 0,
-    "portionOptions": [
-      {
-        "label": "1/4 cup",
-        "portion": "1/4 cup",
-        "carbs": 6
-      },
-      {
-        "label": "1/2 cup",
-        "portion": "1/2 cup",
-        "carbs": 12
-      },
-      {
-        "label": "1 cup",
-        "portion": "1 cup",
-        "carbs": 24
-      },
-      {
-        "label": "1.5 cups",
-        "portion": "1.5 cups",
-        "carbs": 36
-      }
-    ],
-    "smallPortion": "1/4 cup",
-    "smallCarbs": 6,
-    "usualPortion": "1/2 cup",
-    "usualCarbs": 12,
-    "largePortion": "1.5 cups",
-    "largeCarbs": 36,
-    "tags": "grain,bread,rice,pasta",
-    "favorite": false,
-    "verified": false,
-    "active": true,
-    "source": "Curated estimate",
-    "confidence": "Medium"
-  },
-  {
     "id": "arroz-caldo-rice-bread-pasta",
     "name": "Arroz caldo",
     "category": "Rice / Bread / Pasta",
@@ -1248,48 +1169,6 @@
     "usualCarbs": 14,
     "largePortion": "1.5 cups",
     "largeCarbs": 42,
-    "tags": "grain,bread,rice,pasta",
-    "favorite": false,
-    "verified": false,
-    "active": true,
-    "source": "Curated estimate",
-    "confidence": "Medium"
-  },
-  {
-    "id": "champorado-plain-rice-bread-pasta",
-    "name": "Champorado plain",
-    "category": "Rice / Bread / Pasta",
-    "portion": "1/2 cup",
-    "carbs": 26,
-    "calories": 0,
-    "portionOptions": [
-      {
-        "label": "1/4 cup",
-        "portion": "1/4 cup",
-        "carbs": 13
-      },
-      {
-        "label": "1/2 cup",
-        "portion": "1/2 cup",
-        "carbs": 26
-      },
-      {
-        "label": "1 cup",
-        "portion": "1 cup",
-        "carbs": 52
-      },
-      {
-        "label": "1.5 cups",
-        "portion": "1.5 cups",
-        "carbs": 78
-      }
-    ],
-    "smallPortion": "1/4 cup",
-    "smallCarbs": 13,
-    "usualPortion": "1/2 cup",
-    "usualCarbs": 26,
-    "largePortion": "1.5 cups",
-    "largeCarbs": 78,
     "tags": "grain,bread,rice,pasta",
     "favorite": false,
     "verified": false,
@@ -2961,82 +2840,8 @@
     "confidence": "Low"
   },
   {
-    "id": "menudo-rice-meals",
-    "name": "Menudo + rice",
-    "category": "Meals",
-    "portion": "1 serving + 1 cup rice",
-    "carbs": 55,
-    "calories": 0,
-    "portionOptions": [
-      {
-        "label": "1/2 serving",
-        "portion": "1/2 serving",
-        "carbs": 28
-      },
-      {
-        "label": "1 serving + 1 cup rice",
-        "portion": "1 serving + 1 cup rice",
-        "carbs": 55
-      },
-      {
-        "label": "large serving",
-        "portion": "large serving",
-        "carbs": 82
-      }
-    ],
-    "smallPortion": "1/2 serving",
-    "smallCarbs": 28,
-    "usualPortion": "1 serving + 1 cup rice",
-    "usualCarbs": 55,
-    "largePortion": "large serving",
-    "largeCarbs": 82,
-    "tags": "meal,mixed plate",
-    "favorite": false,
-    "verified": false,
-    "active": true,
-    "source": "Curated estimate",
-    "confidence": "Low"
-  },
-  {
     "id": "afritada-rice-meals",
     "name": "Afritada + rice",
-    "category": "Meals",
-    "portion": "1 serving + 1 cup rice",
-    "carbs": 55,
-    "calories": 0,
-    "portionOptions": [
-      {
-        "label": "1/2 serving",
-        "portion": "1/2 serving",
-        "carbs": 28
-      },
-      {
-        "label": "1 serving + 1 cup rice",
-        "portion": "1 serving + 1 cup rice",
-        "carbs": 55
-      },
-      {
-        "label": "large serving",
-        "portion": "large serving",
-        "carbs": 82
-      }
-    ],
-    "smallPortion": "1/2 serving",
-    "smallCarbs": 28,
-    "usualPortion": "1 serving + 1 cup rice",
-    "usualCarbs": 55,
-    "largePortion": "large serving",
-    "largeCarbs": 82,
-    "tags": "meal,mixed plate",
-    "favorite": false,
-    "verified": false,
-    "active": true,
-    "source": "Curated estimate",
-    "confidence": "Low"
-  },
-  {
-    "id": "caldereta-rice-meals",
-    "name": "Caldereta + rice",
     "category": "Meals",
     "portion": "1 serving + 1 cup rice",
     "carbs": 55,
@@ -3442,43 +3247,6 @@
     "confidence": "Low"
   },
   {
-    "id": "nilaga-rice-meals",
-    "name": "Nilaga + rice",
-    "category": "Meals",
-    "portion": "1 bowl + 1 cup rice",
-    "carbs": 50,
-    "calories": 0,
-    "portionOptions": [
-      {
-        "label": "1/2 serving",
-        "portion": "1/2 serving",
-        "carbs": 25
-      },
-      {
-        "label": "1 bowl + 1 cup rice",
-        "portion": "1 bowl + 1 cup rice",
-        "carbs": 50
-      },
-      {
-        "label": "large serving",
-        "portion": "large serving",
-        "carbs": 75
-      }
-    ],
-    "smallPortion": "1/2 serving",
-    "smallCarbs": 25,
-    "usualPortion": "1 bowl + 1 cup rice",
-    "usualCarbs": 50,
-    "largePortion": "large serving",
-    "largeCarbs": 75,
-    "tags": "meal,mixed plate",
-    "favorite": false,
-    "verified": false,
-    "active": true,
-    "source": "Curated estimate",
-    "confidence": "Low"
-  },
-  {
     "id": "tinola-rice-meals",
     "name": "Tinola + rice",
     "category": "Meals",
@@ -3508,43 +3276,6 @@
     "usualCarbs": 48,
     "largePortion": "large serving",
     "largeCarbs": 72,
-    "tags": "meal,mixed plate",
-    "favorite": false,
-    "verified": false,
-    "active": true,
-    "source": "Curated estimate",
-    "confidence": "Low"
-  },
-  {
-    "id": "kare-kare-rice-meals",
-    "name": "Kare-kare + rice",
-    "category": "Meals",
-    "portion": "1 serving + 1 cup rice",
-    "carbs": 58,
-    "calories": 0,
-    "portionOptions": [
-      {
-        "label": "1/2 serving",
-        "portion": "1/2 serving",
-        "carbs": 29
-      },
-      {
-        "label": "1 serving + 1 cup rice",
-        "portion": "1 serving + 1 cup rice",
-        "carbs": 58
-      },
-      {
-        "label": "large serving",
-        "portion": "large serving",
-        "carbs": 87
-      }
-    ],
-    "smallPortion": "1/2 serving",
-    "smallCarbs": 29,
-    "usualPortion": "1 serving + 1 cup rice",
-    "usualCarbs": 58,
-    "largePortion": "large serving",
-    "largeCarbs": 87,
     "tags": "meal,mixed plate",
     "favorite": false,
     "verified": false,
@@ -8993,7 +8724,7 @@
   },
   {
     "id": "frapp-blended-coffee-drinks",
-    "name": "Frapp\u00e9 / blended coffee",
+    "name": "Frappé / blended coffee",
     "category": "Drinks",
     "portion": "1 cup",
     "carbs": 50,

@@ -1,8 +1,8 @@
-# The Scarlet Diaries — V2.6.6
+# The Scarlet Diaries — V2.6.7
 
-**Build name:** Pink Background Refinement
+**Build name:** Visual Meal Builder Foundation
 **Base preserved from:** V2.6.2 Include-All Header Build  
-**Tagline:** Every drop. Every breath. Unstoppable.
+**Tagline:** Every drop. Every page. Unstoppable.
 
 ---
 
@@ -51,11 +51,11 @@ Mood choices:
 
 The new check-in feature intentionally does **not** use these words or phrases:
 
-- breathe
-- breath
-- breathing
-- take a breath
-- deep breath
+- page
+- page
+- page
+- take a page
+- deep page
 
 The check-in copy also avoids telling Amara to calm down, hurry past the feeling, or fix the feeling.
 
@@ -326,7 +326,7 @@ Always follow the guidance of Amara's doctor and diabetes care team.
 - JavaScript syntax check passed.
 - Build string is `V2.6.5`.
 - V2.6.2 features were preserved.
-- The new daily check-in feature contains no banned breath/breathe/breathing wording.
+- The new daily check-in feature contains no banned page/page/page wording.
 
 
 ---
@@ -373,3 +373,32 @@ Changed:
 ## V2.6.6 — Pink Background Refinement
 
 Changed the child-facing app background from soft plum/burgundy to a warmer pink diary palette while keeping Scarlet Diaries contrast, scarlet accents, and readable cards.
+
+
+---
+
+## V2.6.7 — Visual Meal Builder Foundation
+
+Preserved V2.6.6 Pink Background as the base.
+
+Added the first safe foundation of the visual meal builder:
+
+- visual dish builder entry inside Before I Eat
+- starter visual builders for Rice, Sinigang, Tinola, Adobo, McDonald's Burger, Nuggets, Fries, Greek Yogurt, and Drinks
+- bowl, plate, stack, pour, and count builder types
+- SVG-only food visuals, no external image dependencies
+- tap-to-add component chips with carb and body-reference guides
+- hidden-carb discovery cards for foods such as gabi, sayote, papaya, fries, sauces, and sweet drinks
+- unified plate view with vegetable, carb, and protein zones
+- gentle balance observations that never block Continue
+- Continue always leads to hidden-carb check and existing Suggested Apidra estimate
+- Adult Confirmed still auto-saves meal and Apidra
+- mealLogs now include `plateData` when the visual builder is used
+- added five Food Confidence badges: The Plate Builder, Veggie Champion, Protein Protector, The Balance Keeper, and Carb Aware
+- kept classic food search as a fallback button
+- removed confusing food entries from foods.json: kare-kare, dinuguan, nilaga, pochero, caldereta, mechado, menudo, paksiw, lugaw, goto, champorado, palabok, lechon kawali, and bulalo
+
+Important language update:
+
+- The app tagline was changed to **Every drop. Every page. Unstoppable.**
+- The new meal builder does not use the banned page/pagee/pageing wording.
