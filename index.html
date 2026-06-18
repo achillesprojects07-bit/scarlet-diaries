@@ -8,6 +8,13 @@
   <meta name="theme-color" content="#0d0608" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- iOS / iPhone home-screen install support -->
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Scarlet" />
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -24,5 +31,15 @@
     </section>
   </div>
   <script type="module" src="app.js"></script>
+  <script>
+    // Register the service worker so the app is installable + works offline.
+    // Relative path keeps the scope correct on GitHub Pages subpaths.
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js")
+          .catch(err => console.warn("Service worker registration failed:", err));
+      });
+    }
+  </script>
 </body>
 </html>

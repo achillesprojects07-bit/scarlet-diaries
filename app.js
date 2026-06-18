@@ -1099,6 +1099,14 @@ function layout(content, active="home"){
     </div>`;
   bindGlobal();
 }
+function doLogout(){
+  sessionStorage.removeItem("scarletJustLoggedIn");
+  state.user = null;
+  state.role = null;
+  state.firebaseOffline = false;
+  try{ signOut(auth); }catch(e){}
+  renderLogin();
+}
 function bindGlobal(){
   document.querySelectorAll("button").forEach(btn => {
     if(btn.dataset.tapBound) return;
@@ -1109,7 +1117,7 @@ function bindGlobal(){
   });
   document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => { state.view = btn.dataset.view; render(); });
   const logoutBtn = document.querySelector("[data-action='logout']");
-  if(logoutBtn) logoutBtn.onclick = () => signOut(auth);
+  if(logoutBtn) logoutBtn.onclick = doLogout;
 }
 
 // ── FLOW DONE ────────────────────────────────────────────────
@@ -3191,7 +3199,7 @@ function renderDemoResetDone(counts){
     </div>`;
   bindGlobal();
   document.getElementById("backAdultAfterReset").onclick = () => renderAdult();
-  document.getElementById("logoutAfterReset").onclick = () => signOut(auth);
+  document.getElementById("logoutAfterReset").onclick = doLogout;
 }
 
 // ── MEDICAL SETTINGS ─────────────────────────────────────────
@@ -3483,7 +3491,7 @@ function renderAdult(){
     </div>`;
 
   bindGlobal();
-  document.getElementById("logoutAdult").onclick    = () => signOut(auth);
+  document.getElementById("logoutAdult").onclick    = doLogout;
   document.getElementById("openReportsBtn").onclick = () => renderReportsData();
   document.getElementById("openMedicalBtn").onclick = () => renderMedicalSettings();
   document.getElementById("openVaultBtn").onclick   = () => renderAdultVaultSummary();
