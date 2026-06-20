@@ -1,0 +1,6 @@
+# Local tooling / caches — not part of the app
+.claude/
+.firebase/
+node_modules/
+*.log
+firebase-debug.log

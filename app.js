@@ -656,6 +656,110 @@ const VISUAL_MEAL_BUILDERS = [
       { id:"juice-box", name:"Juice box", portion:"1 box", carbs:20, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"One small box", svg:"juice-box", countable:true, max:2 },
       { id:"coke-can", name:"Soft drink can", portion:"1 can", carbs:39, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"One can", svg:"can", countable:true, max:2 }
     ]
+  },
+  {
+    id:"pancit", name:"Pancit", type:"bowl", openingPrompt:"Pancit comes in many sizes. Count what is really on your plate.",
+    hiddenCarbAlert:"The noodles are where the carbs hide. A party scoop can be two cups. Count carefully.",
+    components:[
+      { id:"pancit-noodle-half", name:"Noodles half cup", portion:"1/2 cup", carbs:20, protein:2, fat:2, fiber:1, zone:"carb", bodyRef:"Cupped hand", svg:"noodle", countable:true, max:4, hiddenCarbFlag:true },
+      { id:"pancit-chicken", name:"Chicken", portion:"2 tbsp", carbs:0, protein:7, fat:3, fiber:0, zone:"protein", bodyRef:"Two thumbs", svg:"chicken", countable:true, max:4 },
+      { id:"pancit-shrimp", name:"Shrimp", portion:"3 pieces", carbs:0, protein:9, fat:0.5, fiber:0, zone:"protein", bodyRef:"Three fingers", svg:"shrimp", countable:true, max:4 },
+      { id:"pancit-cabbage", name:"Cabbage", portion:"1/2 cup", carbs:3, protein:1, fat:0, fiber:1.5, zone:"vegetable", bodyRef:"Cupped hand", svg:"cabbage", countable:false },
+      { id:"pancit-carrots", name:"Carrots", portion:"2 tbsp", carbs:3, protein:0.5, fat:0, fiber:1, zone:"vegetable", bodyRef:"Two thumbs", svg:"carrot", countable:false }
+    ]
+  },
+  {
+    id:"filipino-spaghetti", name:"Filipino Spaghetti", type:"plate", openingPrompt:"Build your spaghetti the way it is on your plate.",
+    hiddenCarbAlert:"The sweet sauce adds extra sugar on top of the noodle carbs. Both count together.",
+    components:[
+      { id:"fil-spag-noodle", name:"Spaghetti noodles", portion:"1 cup", carbs:43, protein:7, fat:1, fiber:2.5, zone:"carb", bodyRef:"Closed fist", svg:"noodle", countable:true, max:2 },
+      { id:"fil-spag-sauce", name:"Sweet sauce", portion:"1/4 cup", carbs:12, protein:2, fat:3, fiber:1, zone:"mixed", bodyRef:"Cupped hand small", svg:"sauce", countable:false, hiddenCarbFlag:true },
+      { id:"fil-spag-hotdog", name:"Hotdog slices", portion:"1 hotdog", carbs:3, protein:5, fat:8, fiber:0, zone:"protein", bodyRef:"One finger length", svg:"hotdog", countable:true, max:3 },
+      { id:"fil-spag-cheese", name:"Cheese", portion:"2 tbsp", carbs:1, protein:4, fat:5, fiber:0, zone:"protein", bodyRef:"Two thumbs", svg:"cheese", countable:false }
+    ]
+  },
+  {
+    id:"fried-chicken", name:"Fried Chicken", type:"plate", openingPrompt:"Count your pieces of fried chicken.",
+    hiddenCarbAlert:"The crispy breading is carbs, and so is the gravy. The chicken inside is almost none.",
+    components:[
+      { id:"fc-drumstick", name:"Drumstick", portion:"1 piece", carbs:0, protein:14, fat:9, fiber:0, zone:"protein", bodyRef:"Two fingers wide", svg:"drumstick", countable:true, max:4 },
+      { id:"fc-thigh", name:"Chicken thigh", portion:"1 piece", carbs:0, protein:20, fat:12, fiber:0, zone:"protein", bodyRef:"Palm of hand", svg:"chicken", countable:true, max:4 },
+      { id:"fc-breading", name:"Crispy breading", portion:"1 coating", carbs:8, protein:2, fat:5, fiber:0.5, zone:"carb", bodyRef:"Thin layer", svg:"breading", countable:true, max:4, hiddenCarbFlag:true },
+      { id:"fc-gravy", name:"Gravy", portion:"2 tbsp", carbs:5, protein:0.5, fat:1, fiber:0, zone:"carb", bodyRef:"Two thumbs", svg:"gravy", countable:false, hiddenCarbFlag:true }
+    ]
+  },
+  {
+    id:"lumpia", name:"Lumpia", type:"count", openingPrompt:"Tap to count each lumpia you have.",
+    hiddenCarbAlert:"The wrapper holds carbs, and the sweet-and-sour dip adds more. Count both.",
+    components:[
+      { id:"lumpia-fried", name:"Fried lumpia", portion:"1 piece", carbs:8, protein:3, fat:5, fiber:0.5, zone:"mixed", bodyRef:"One finger long", svg:"lumpia", countable:true, max:10 },
+      { id:"lumpia-dip", name:"Sweet and sour dip", portion:"1 tbsp", carbs:7, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"One thumb", svg:"dip", countable:true, max:3, hiddenCarbFlag:true }
+    ]
+  },
+  {
+    id:"champorado", name:"Champorado", type:"bowl", openingPrompt:"Champorado is a chocolate rice breakfast. Let's count what is in your bowl.",
+    hiddenCarbAlert:"The chocolate rice is already high in carbs. Sugar and condensed milk add even more.",
+    components:[
+      { id:"champorado-base", name:"Chocolate rice", portion:"1 cup", carbs:42, protein:4, fat:3, fiber:1.5, zone:"carb", bodyRef:"Closed fist", svg:"champorado", countable:true, max:2 },
+      { id:"champorado-sugar", name:"Sugar", portion:"1 tsp", carbs:4, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"Thumb tip", svg:"sugar", countable:true, max:3, hiddenCarbFlag:true },
+      { id:"champorado-milk", name:"Condensed milk", portion:"1 tbsp", carbs:10, protein:1, fat:1.5, fiber:0, zone:"carb", bodyRef:"One thumb", svg:"milk", countable:true, max:2, hiddenCarbFlag:true }
+    ]
+  },
+  {
+    id:"silog", name:"Silog Breakfast", type:"plate", openingPrompt:"Build your silog breakfast plate.",
+    hiddenCarbAlert:"The garlic rice carries most of the carbs. Sweet meats like tocino and longganisa add a little sugar too.",
+    components:[
+      { id:"silog-garlic-rice", name:"Garlic rice", portion:"1 cup", carbs:45, protein:4, fat:3, fiber:0.6, zone:"carb", bodyRef:"Closed fist", svg:"rice", countable:true, max:2, hiddenCarbFlag:true },
+      { id:"silog-egg", name:"Fried egg", portion:"1 whole", carbs:0.5, protein:6, fat:5, fiber:0, zone:"protein", bodyRef:"Palm of hand", svg:"egg", countable:true, max:2 },
+      { id:"silog-tapa", name:"Tapa (beef)", portion:"1 serving", carbs:2, protein:18, fat:9, fiber:0, zone:"protein", bodyRef:"Palm of hand", svg:"tapa", countable:false },
+      { id:"silog-longganisa", name:"Longganisa", portion:"2 pieces", carbs:4, protein:9, fat:14, fiber:0, zone:"protein", bodyRef:"Two fingers each", svg:"longganisa", countable:true, max:3, hiddenCarbFlag:true },
+      { id:"silog-tocino", name:"Tocino", portion:"1 serving", carbs:6, protein:14, fat:10, fiber:0, zone:"protein", bodyRef:"Palm of hand", svg:"tocino", countable:false, hiddenCarbFlag:true }
+    ]
+  },
+  {
+    id:"oatmeal", name:"Oatmeal", type:"bowl", openingPrompt:"Build your oatmeal bowl for breakfast.",
+    hiddenCarbAlert:"Plain oats have carbs, and honey adds quick sugar on top. Count the honey too.",
+    components:[
+      { id:"oatmeal-oats", name:"Cooked oats", portion:"1 cup", carbs:27, protein:5, fat:3, fiber:4, zone:"carb", bodyRef:"Closed fist", svg:"oats", countable:false },
+      { id:"oatmeal-milk", name:"Milk", portion:"1/2 cup", carbs:6, protein:4, fat:2.5, fiber:0, zone:"protein", bodyRef:"Cupped hand", svg:"milk", countable:false },
+      { id:"oatmeal-banana", name:"Banana slices", portion:"1/2 banana", carbs:13, protein:0.5, fat:0, fiber:1.5, zone:"carb", bodyRef:"Half palm length", svg:"banana", countable:true, max:2 },
+      { id:"oatmeal-honey", name:"Honey", portion:"1 tsp", carbs:6, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"Thumb tip", svg:"honey", countable:true, max:3, hiddenCarbFlag:true }
+    ]
+  },
+  {
+    id:"pizza", name:"Pizza", type:"count", openingPrompt:"Tap to count each slice of pizza.",
+    hiddenCarbAlert:"Each slice has a carb-heavy crust. The carbs add up fast as you count slices.",
+    components:[
+      { id:"pizza-cheese-slice", name:"Cheese slice", portion:"1 slice", carbs:30, protein:9, fat:8, fiber:2, zone:"carb", bodyRef:"Flat hand sized", svg:"pizza", countable:true, max:8 },
+      { id:"pizza-pepperoni-slice", name:"Pepperoni slice", portion:"1 slice", carbs:31, protein:11, fat:12, fiber:2, zone:"carb", bodyRef:"Flat hand sized", svg:"pizza", countable:true, max:8 }
+    ]
+  },
+  {
+    id:"pandesal", name:"Pandesal", type:"count", openingPrompt:"Count your pandesal and pick a spread.",
+    hiddenCarbAlert:"Each pandesal is carbs, and jam adds extra sugar. Peanut butter is mostly protein and fat.",
+    components:[
+      { id:"pandesal-piece", name:"Pandesal", portion:"1 piece", carbs:20, protein:3, fat:2, fiber:1, zone:"carb", bodyRef:"Closed fist small", svg:"bread", countable:true, max:4 },
+      { id:"pandesal-peanut", name:"Peanut butter", portion:"1 tbsp", carbs:3, protein:4, fat:8, fiber:1, zone:"protein", bodyRef:"One thumb", svg:"peanut", countable:true, max:2 },
+      { id:"pandesal-jam", name:"Jam", portion:"1 tbsp", carbs:13, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"One thumb", svg:"jam", countable:true, max:2, hiddenCarbFlag:true }
+    ]
+  },
+  {
+    id:"fresh-fruit", name:"Fresh Fruit", type:"count", openingPrompt:"Pick the fruit you are having and count it.",
+    hiddenCarbAlert:"Fruit is a healthy snack, but it still carries natural sugar. Count what you really eat.",
+    components:[
+      { id:"fruit-apple", name:"Apple", portion:"1 small", carbs:15, protein:0.5, fat:0, fiber:3, zone:"carb", bodyRef:"Closed fist", svg:"apple", countable:true, max:3 },
+      { id:"fruit-mango", name:"Mango cheeks", portion:"2 cheeks", carbs:17, protein:1, fat:0, fiber:2, zone:"carb", bodyRef:"Two cupped palms", svg:"mango", countable:true, max:3 },
+      { id:"fruit-grapes", name:"Grapes", portion:"10 pieces", carbs:14, protein:0.5, fat:0, fiber:1, zone:"carb", bodyRef:"Cupped hand", svg:"grapes", countable:true, max:3 }
+    ]
+  },
+  {
+    id:"ice-cream", name:"Ice Cream", type:"pour", openingPrompt:"Build your ice cream treat.",
+    hiddenCarbAlert:"Ice cream is sweet and carries sugar. Toppings like syrup and sprinkles add even more.",
+    components:[
+      { id:"ice-cream-scoop", name:"Ice cream scoop", portion:"1 scoop", carbs:16, protein:2, fat:7, fiber:0, zone:"carb", bodyRef:"Closed fist small", svg:"ice-cream", countable:true, max:3, hiddenCarbFlag:true },
+      { id:"ice-cream-syrup", name:"Chocolate syrup", portion:"1 tbsp", carbs:10, protein:0, fat:0, fiber:0, zone:"carb", bodyRef:"One thumb", svg:"syrup", countable:true, max:2, hiddenCarbFlag:true },
+      { id:"ice-cream-cone", name:"Cone", portion:"1 cone", carbs:8, protein:1, fat:1, fiber:0, zone:"carb", bodyRef:"One finger tall", svg:"cone", countable:false }
+    ]
   }
 ];
 
