@@ -3181,7 +3181,7 @@ function playAlertSound(severity){
     const notes = serious
       ? [ {f:587.33, t:0.00}, {f:783.99, t:0.18}, {f:987.77, t:0.36} ]   // D5–G5–B5, ~0.6s
       : [ {f:659.25, t:0.00}, {f:880.00, t:0.18} ];                       // E5–A5, ~0.35s
-    const peak = 0.15;          // keep it soft — child's phone
+    const peak = 0.6;           // loud enough to get attention across a room
     const now = ctx.currentTime;
     notes.forEach(n => {
       const osc = ctx.createOscillator();
