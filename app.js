@@ -1215,6 +1215,9 @@ function bindGlobal(){
   document.querySelectorAll("button").forEach(btn => {
     if(btn.dataset.tapBound) return;
     btn.dataset.tapBound = "1";
+    // Resume the (suspended) AudioContext on a real user gesture so alert
+    // sounds triggered right after a tap are allowed to play (mobile autoplay).
+    btn.addEventListener("pointerdown", resumeAudio);
     btn.addEventListener("pointerdown", () => btn.classList.add("is-pressed"));
     btn.addEventListener("pointerup",   () => setTimeout(() => btn.classList.remove("is-pressed"), 120));
     btn.addEventListener("pointerleave",() => btn.classList.remove("is-pressed"));
@@ -3149,7 +3152,61 @@ async function renderReportsData(){
 async function addKetoneLog(glucose, ketoneResult){
   await addDoc(collection(db,"families",FAMILY_ID,"children",CHILD_ID,"ketoneLogs"),{ glucose, ketoneResult, createdAt:serverTimestamp(), enteredBy:state.user.uid, alertLevel:ketoneResult==="Moderate / large"?"red":"orange" });
 }
+// ── ALERT SOUND (Web Audio, fully offline) ───────────────────
+let _audioCtx = null;
+function getAudioCtx(){
+  try{
+    if(!_audioCtx){
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if(!Ctx) return null;
+      _audioCtx = new Ctx();
+    }
+    return _audioCtx;
+  }catch(e){ return null; }
+}
+// Resume a suspended AudioContext from within a user gesture (mobile autoplay).
+function resumeAudio(){
+  try{
+    if(_audioCtx && _audioCtx.state === "suspended") _audioCtx.resume().catch(()=>{});
+  }catch(e){}
+}
+// Play a short, gentle chime when an alert is raised. Never throws.
+function playAlertSound(severity){
+  try{
+    const ctx = getAudioCtx();
+    if(!ctx) return;
+    if(ctx.state === "suspended"){ try{ ctx.resume(); }catch(e){} }
+    // More serious alerts get a slightly more insistent (but still gentle) three-note chime.
+    const serious = (severity === "red" || severity === "critical");
+    const notes = serious
+      ? [ {f:587.33, t:0.00}, {f:783.99, t:0.18}, {f:987.77, t:0.36} ]   // D5–G5–B5, ~0.6s
+      : [ {f:659.25, t:0.00}, {f:880.00, t:0.18} ];                       // E5–A5, ~0.35s
+    const peak = 0.15;          // keep it soft — child's phone
+    const now = ctx.currentTime;
+    notes.forEach(n => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(n.f, now + n.t);
+      const start = now + n.t;
+      const end = start + 0.17;
+      // Smooth attack + exponential decay so there are no clicks.
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.linearRampToValueAtTime(peak, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(end + 0.02);
+    });
+    // Subtle vibration on serious alerts only, feature-detected and guarded.
+    if(navigator.vibrate){
+      try{ navigator.vibrate(severity === "orange" ? 0 : [120, 60, 120]); }catch(e){}
+    }
+  }catch(e){ /* audio must never break alert logic */ }
+}
+
 async function createAlert(type, severity, message){
+  playAlertSound(severity);
   if(state.firebaseOffline){
     const localAlerts = JSON.parse(localStorage.getItem("scarletLocalAlerts") || "[]");
     localAlerts.unshift({ type, severity, message, createdAt:new Date().toISOString() });
