@@ -3170,27 +3170,30 @@ function resumeAudio(){
     if(_audioCtx && _audioCtx.state === "suspended") _audioCtx.resume().catch(()=>{});
   }catch(e){}
 }
-// Play a short, gentle chime when an alert is raised. Never throws.
+// Play a LOUD attention chime when an alert is raised. Never throws.
 function playAlertSound(severity){
   try{
     const ctx = getAudioCtx();
     if(!ctx) return;
     if(ctx.state === "suspended"){ try{ ctx.resume(); }catch(e){} }
-    // More serious alerts get a slightly more insistent (but still gentle) three-note chime.
     const serious = (severity === "red" || severity === "critical");
+    const base = serious
+      ? [ {f:587.33, t:0.00}, {f:783.99, t:0.20}, {f:987.77, t:0.40} ]   // D5–G5–B5
+      : [ {f:659.25, t:0.00}, {f:880.00, t:0.20} ];                       // E5–A5
+    // Serious alerts repeat the pattern once so it's much harder to miss.
     const notes = serious
-      ? [ {f:587.33, t:0.00}, {f:783.99, t:0.18}, {f:987.77, t:0.36} ]   // D5–G5–B5, ~0.6s
-      : [ {f:659.25, t:0.00}, {f:880.00, t:0.18} ];                       // E5–A5, ~0.35s
-    const peak = 0.6;           // loud enough to get attention across a room
+      ? base.concat(base.map(n => ({ f:n.f, t:n.t + 0.70 })))
+      : base;
+    const peak = 0.85;          // near full volume — built to carry across a room
     const now = ctx.currentTime;
     notes.forEach(n => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = "sine";
+      osc.type = "square";      // a square wave carries far louder than a sine
       osc.frequency.setValueAtTime(n.f, now + n.t);
       const start = now + n.t;
-      const end = start + 0.17;
-      // Smooth attack + exponential decay so there are no clicks.
+      const end = start + 0.24;
+      // Quick attack + decay envelope so there are no clicks.
       gain.gain.setValueAtTime(0.0001, start);
       gain.gain.linearRampToValueAtTime(peak, start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, end);
@@ -3198,9 +3201,9 @@ function playAlertSound(severity){
       osc.start(start);
       osc.stop(end + 0.02);
     });
-    // Subtle vibration on serious alerts only, feature-detected and guarded.
+    // Strong vibration on EVERY alert (longer + repeated buzz for serious ones).
     if(navigator.vibrate){
-      try{ navigator.vibrate(severity === "orange" ? 0 : [120, 60, 120]); }catch(e){}
+      try{ navigator.vibrate(serious ? [400,150,400,150,400] : [250,120,250]); }catch(e){}
     }
   }catch(e){ /* audio must never break alert logic */ }
 }
