@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const FAMILY_ID = "scarlet-family";
 const CHILD_ID  = "amara";
 const APP_NAME  = "The Scarlet Diaries";
-const BUILD     = "V2.6.7";
+const BUILD     = "V2.6.10";
 const CIRCLE    = ["Mom", "Dad", "Tita"];
 const DEMO_PIN = "1111";
 const ROLE_AUTH_ACCOUNTS = {
@@ -1378,23 +1378,38 @@ function renderKetonePrompt(next="meal"){
       <p><strong>Glucose:</strong> ${g} mg/dL</p>
       <p class="small muted" style="margin-top:6px">Please check ketones if strips are available. Tell your Circle now. If there are no strips, log it honestly so adults can help.</p>
     </div>
-    <div class="grid single">
+    <div class="grid single" id="ketoneChoiceList">
       ${["I checked — negative","Trace / small","Moderate / large","No strips","I don't know how","Adult not available"].map(k => `
-        <button class="action" data-ketone="${k}"><strong>${k}</strong><span>Save ketone status.</span></button>
+        <button type="button" class="action" data-ketone="${k}"><strong>${k}</strong><span>Save ketone status.</span></button>
       `).join("")}
     </div>`, "meal");
-  document.querySelectorAll("[data-ketone]").forEach(btn => btn.onclick = async () => {
-    state.meal.ketones = btn.dataset.ketone;
-    await addKetoneLog(g, btn.dataset.ketone);
-    if(btn.dataset.ketone === "No strips") await unlockBadge("truth-keeper");
-    if(btn.dataset.ketone.includes("checked")){ await unlockBadge("ketone-seer"); }
-    if(g >= state.settings.urgentHighThreshold) await createAlert("urgent_high","red",`Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
-    else await createAlert("high","orange",`Amara logged glucose ${g}. Ketone status: ${btn.dataset.ketone}.`);
-    if(btn.dataset.ketone === "Moderate / large") return renderEmergency("Moderate or large ketones need adult help now.");
-    if(next === "meal") renderFoodBuilder(); else renderHighSugarSafety();
+
+  const list = document.getElementById("ketoneChoiceList");
+  if(!list) return;
+  list.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-ketone]");
+    if(!btn) return;
+    btn.classList.add("scarlet");
+    const restore = setBusy(btn, "Saving…");
+    try{
+      const ketoneValue = btn.dataset.ketone;
+      state.meal.ketones = ketoneValue;
+      await addKetoneLog(g, ketoneValue);
+      if(ketoneValue === "No strips") await unlockBadge("truth-keeper");
+      if(ketoneValue.includes("checked")) await unlockBadge("ketone-seer");
+      if(g >= state.settings.urgentHighThreshold) await createAlert("urgent_high","red",`Amara logged glucose ${g}. Ketone status: ${ketoneValue}.`);
+      else await createAlert("high","orange",`Amara logged glucose ${g}. Ketone status: ${ketoneValue}.`);
+      if(ketoneValue === "Moderate / large") return renderEmergency("Moderate or large ketones need adult help now.");
+      if(next === "meal") renderFoodBuilder(); else renderHighSugarSafety();
+    }catch(e){
+      console.warn("Ketone choice save failed, continuing safely:", e);
+      toast("Saved locally for now. Continue.");
+      if(next === "meal") renderFoodBuilder(); else renderHighSugarSafety();
+    }finally{
+      restore();
+    }
   });
 }
-
 
 function ensurePlateState(){
   if(!Array.isArray(state.meal.plateDishes)) state.meal.plateDishes = [];
@@ -1432,13 +1447,293 @@ function computePlateData(){
   return { dishes, vegetableZoneFoods, carbZoneFoods, proteinZoneFoods, totalCarbs, totalProtein, totalFat, totalFiber, hasProtein, hasVegetables, carbsInRange, isBalanced, observations:observations.slice(0,2) };
 }
 
+
+// ── V2.6.9 FOOD TILE BUILDER REDESIGN ───────────────────────
+const TILE_BODY_GUIDES = [
+  ["rice", "Closed fist"],
+  ["pasta", "Closed fist"],
+  ["noodle", "Closed fist"],
+  ["bread", "Palm sized"],
+  ["toast", "Palm sized"],
+  ["pita", "Palm sized flat"],
+  ["oatmeal", "Closed fist"],
+  ["milk", "Closed fist of liquid"],
+  ["juice", "One small box or cup"],
+  ["drink", "Cup or bottle size"],
+  ["chocolate", "Thumb-sized amount"],
+  ["honey", "Thumb tip"],
+  ["sauce", "Thumb-sized amount"],
+  ["gravy", "Small cup"],
+  ["ketchup", "Thumb tip squeeze"],
+  ["chicken", "Palm of hand"],
+  ["egg", "Closed fist loosely"],
+  ["fish", "Palm of hand"],
+  ["shrimp", "Four fingers"],
+  ["pork", "Palm of hand"],
+  ["beef", "Palm of hand"],
+  ["cheese", "Two fingers flat"],
+  ["brie", "Two fingers flat"],
+  ["camembert", "Two fingers flat"],
+  ["yogurt", "Closed fist"],
+  ["fruit", "Closed fist"],
+  ["banana", "Palm length"],
+  ["apple", "Closed fist"],
+  ["mango", "Closed fist"],
+  ["grape", "Ten marble-sized"],
+  ["vegetable", "Closed fist"],
+  ["tomato", "One small tomato"],
+  ["cucumber", "Four coin rounds"],
+  ["salad", "Closed fist"],
+  ["sinigang", "Count each visible piece"],
+  ["tinola", "Count each visible piece"],
+  ["adobo", "Count each piece"],
+  ["nugget", "Two fingers each"],
+  ["fries", "Cupped hand"],
+  ["pizza", "One slice"],
+  ["burger", "Palm sized round"],
+  ["default", "Starting guide"]
+];
+
+function inferBodyRef(food){
+  const explicit = food.bodyRef || food.bodyGuide;
+  if(explicit) return explicit;
+  const blob = `${food.name||""} ${food.category||""} ${food.tags||""}`.toLowerCase();
+  const found = TILE_BODY_GUIDES.find(([key]) => key !== "default" && blob.includes(key));
+  return found ? found[1] : "Starting guide";
+}
+
+function inferTileZone(food){
+  const c = Number(food.carbs||0);
+  const blob = `${food.name||""} ${food.category||""} ${food.tags||""}`.toLowerCase();
+  if(blob.includes("vegetable") || blob.includes("salad") || blob.includes("kangkong") || blob.includes("tomato") || blob.includes("cucumber")) return "vegetable";
+  if(blob.includes("chicken") || blob.includes("egg") || blob.includes("fish") || blob.includes("shrimp") || blob.includes("pork") || blob.includes("beef") || blob.includes("cheese") || blob.includes("yogurt") || blob.includes("sausage")) return c <= 8 ? "protein" : "mixed";
+  if(c >= 12) return "carb";
+  return "mixed";
+}
+
+function getFoodPortions(food){
+  if(Array.isArray(food.portionOptions) && food.portionOptions.length){
+    return food.portionOptions.slice(0,4).map((p,idx) => ({
+      label:p.label || p.portion || `Option ${idx+1}`,
+      portion:p.portion || p.label || food.portion || "1 serving",
+      carbs:Number(p.carbs ?? food.carbs ?? 0)
+    }));
+  }
+  const opts = [];
+  if(food.smallPortion !== undefined) opts.push({ label:food.smallPortion, portion:food.smallPortion, carbs:Number(food.smallCarbs ?? food.carbs ?? 0) });
+  if(food.usualPortion !== undefined) opts.push({ label:food.usualPortion, portion:food.usualPortion, carbs:Number(food.usualCarbs ?? food.carbs ?? 0) });
+  if(food.largePortion !== undefined) opts.push({ label:food.largePortion, portion:food.largePortion, carbs:Number(food.largeCarbs ?? food.carbs ?? 0) });
+  if(opts.length) return opts.slice(0,4);
+  return [{ label:food.portion || "1 serving", portion:food.portion || "1 serving", carbs:Number(food.carbs||0) }];
+}
+
+function tileCategoryList(){
+  return [
+    { id:"Favorites", label:"My usual foods", sub:"Amara's familiar foods" },
+    { id:"Breakfast Favorites", label:"Breakfast", sub:"Morning foods" },
+    { id:"Meal Favorites", label:"Meal favorites", sub:"Foods she often eats" },
+    { id:"Meals", label:"Meals", sub:"Main dishes" },
+    { id:"Rice / Bread / Pasta", label:"Rice / bread / pasta", sub:"Main carbs" },
+    { id:"Drinks", label:"Drinks", sub:"Milk, juice, water" },
+    { id:"Fruit", label:"Fruit", sub:"Count the size" },
+    { id:"Snacks & Sweets", label:"Snacks", sub:"Small bites" },
+    { id:"Sauces / Hidden Carbs", label:"Sauces", sub:"Easy-to-miss carbs" },
+    { id:"Search", label:"Search all", sub:"Find by first letters" },
+    { id:"Add Food", label:"Add food", sub:"Ask adult for label carbs" }
+  ];
+}
+
+function getTileFoods(){
+  let foods = state.foods.filter(f => f.active !== false);
+  const cat = state.foodCategory || "Favorites";
+  const term = (state.foodSearch||"").toLowerCase().trim();
+
+  if(cat === "Favorites"){
+    foods = foods.filter(f => f.favorite || f.category === "Breakfast Favorites" || f.category === "Meal Favorites");
+  }else if(cat === "Search"){
+    // Keep all active foods.
+  }else if(cat === "Add Food"){
+    return [];
+  }else{
+    foods = foods.filter(f => f.category === cat);
+  }
+
+  if(term){
+    foods = foods.filter(f => `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().startsWith(term) || `${f.name} ${f.category} ${f.tags||""}`.toLowerCase().includes(term));
+  }
+
+  return foods
+    .sort((a,b) => Number(!!b.favorite)-Number(!!a.favorite) || String(a.name).localeCompare(String(b.name)))
+    .slice(0,36);
+}
+
+function mealTotals(){
+  const carbs = state.meal.items.reduce((s,x)=>s+Number(x.carbs||0),0);
+  const proteinItems = state.meal.items.filter(x => (x.zone||inferTileZone(x)) === "protein" || Number(x.protein||0) >= 7).length;
+  const vegItems = state.meal.items.filter(x => (x.zone||inferTileZone(x)) === "vegetable").length;
+  return { carbs, proteinItems, vegItems, count:state.meal.items.length };
+}
+
+function tileDiscovery(food, portion){
+  const blob = `${food.name||""} ${food.category||""} ${food.tags||""}`.toLowerCase();
+  const carbs = Number(portion?.carbs ?? food.carbs ?? 0);
+  if(blob.includes("gabi")) return "Gabi is easy to forget. Count each piece you can see.";
+  if(blob.includes("sayote") || blob.includes("papaya")) return "This vegetable carries some carbs, so counting it helps.";
+  if(blob.includes("sauce") || blob.includes("gravy") || blob.includes("honey") || blob.includes("ketchup")) return "Sauces can hide carbs. Add only what is really there.";
+  if(blob.includes("juice") || blob.includes("soft drink") || blob.includes("coke")) return "Drinks can add carbs quickly. It is good that you counted it.";
+  if(blob.includes("fries") || blob.includes("breading") || blob.includes("nugget")) return "Breading and fries count as carbs. This is a useful catch.";
+  if(carbs >= 30) return "This is a bigger carb item. The Apidra estimate will include it.";
+  if(carbs <= 2) return "This adds very little carb. It still belongs in the meal picture.";
+  return "";
+}
+
 function renderFoodBuilder(){
+  if(!state.foodCategory) state.foodCategory = "Favorites";
+  if(state.foodCategory === "Add Food") return renderCustomFoodForm("meal");
+
+  const totals = mealTotals();
+  const categories = tileCategoryList();
+  const results = getTileFoods();
+  const itemsHtml = state.meal.items.map((it,i) => `
+    <div class="meal-tile-item">
+      <div>
+        <strong>${esc(it.name)}</strong>
+        <span>${esc(it.portion)} · ${Number(it.carbs||0)}g carbs</span>
+      </div>
+      <button class="mini-remove" data-remove="${i}" aria-label="Remove ${esc(it.name)}">×</button>
+    </div>`).join("");
+
+  layout(`
+    <div class="card dark food-tile-hero">
+      <h2>Build your meal</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">Choose the food, then tap the portion that looks closest.</p>
+    </div>
+
+    <section class="meal-so-far-panel">
+      <div class="meal-so-far-top">
+        <div>
+          <p class="small muted">Meal so far</p>
+          <strong>${Math.round(totals.carbs)}g carbs</strong>
+        </div>
+        <div class="meal-mini-stats">
+          <span>${totals.count} item${totals.count===1?"":"s"}</span>
+          <span>${totals.proteinItems ? "Protein added" : "No protein yet"}</span>
+          <span>${totals.vegItems ? "Vegetables added" : "No vegetables yet"}</span>
+        </div>
+      </div>
+      ${itemsHtml ? `<div class="meal-tile-list">${itemsHtml}</div>` : `<p class="small muted">Nothing added yet. Start with one food.</p>`}
+      ${totals.count ? `
+        <div class="btn-row tile-continue-row">
+          <button class="btn scarlet" id="goHidden">Continue</button>
+          <button class="btn secondary" id="skipHidden">No hidden carbs</button>
+        </div>` : ""}
+    </section>
+
+    <section class="food-category-strip">
+      ${categories.map(c => `<button class="food-cat-tile ${state.foodCategory===c.id?"active":""}" data-food-cat="${c.id}">
+        <strong>${esc(c.label)}</strong><span>${esc(c.sub)}</span>
+      </button>`).join("")}
+    </section>
+
+    <section class="card food-search-card">
+      <div class="field">
+        <label>Search food by name or first letters</label>
+        <input id="foodSearch" value="${esc(state.foodSearch||"")}" placeholder="Try rice, egg, milk, pita…" />
+      </div>
+    </section>
+
+    <section class="food-tile-grid">
+      ${results.length ? results.map(food => renderFoodTile(food)).join("") : `<div class="card"><p class="muted small">No foods found here. Try Search all or Add food.</p></div>`}
+    </section>
+
+    <div class="card">
+      <button class="btn secondary full" id="classicFoodSearch">Use classic food search</button>
+    </div>`, "meal");
+
+  document.querySelectorAll("[data-food-cat]").forEach(btn => btn.onclick = () => {
+    state.foodCategory = btn.dataset.foodCat;
+    state.foodSearch = "";
+    if(state.foodCategory === "Add Food") renderCustomFoodForm("meal");
+    else renderFoodBuilder();
+  });
+
+  const searchInput = document.getElementById("foodSearch");
+  if(searchInput) searchInput.oninput = () => { state.foodSearch = searchInput.value; renderFoodBuilder(); };
+
+  document.querySelectorAll("[data-add-food]").forEach(btn => btn.onclick = () => {
+    const food = state.foods.find(f => String(f.id || f.name) === btn.dataset.addFood);
+    const portionIndex = Number(btn.dataset.portionIndex || 0);
+    if(!food) return toast("Food not found.");
+    const portion = getFoodPortions(food)[portionIndex] || getFoodPortions(food)[0];
+    const added = {
+      name:food.name,
+      category:food.category,
+      portion:portion.portion,
+      carbs:Number(portion.carbs||0),
+      calories:Number(food.calories||0),
+      source:food.source||"Food tile builder",
+      confidence:food.confidence||"",
+      zone:inferTileZone(food),
+      bodyRef:inferBodyRef(food)
+    };
+    state.meal.items.push(added);
+    btn.classList.add("added");
+    btn.innerHTML = "Added ✓";
+    const note = tileDiscovery(food, portion);
+    toast(note || `${food.name} added.`);
+    setTimeout(renderFoodBuilder, 280);
+  });
+
+  document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => {
+    state.meal.items.splice(Number(btn.dataset.remove),1);
+    toast("Removed.");
+    renderFoodBuilder();
+  });
+
+  const goHidden = document.getElementById("goHidden");
+  if(goHidden) goHidden.onclick = () => renderHiddenCarbs();
+  const skipHidden = document.getElementById("skipHidden");
+  if(skipHidden) skipHidden.onclick = () => { state.meal.hiddenChecked = true; renderMealEstimate(); };
+  document.getElementById("classicFoodSearch").onclick = () => renderClassicFoodBuilder();
+  scrollUp();
+}
+
+function renderFoodTile(food){
+  const portions = getFoodPortions(food);
+  const bodyRef = inferBodyRef(food);
+  const zone = inferTileZone(food);
+  const key = esc(String(food.id || food.name));
+  return `<article class="food-tile ${zone}">
+    <div class="food-tile-head">
+      <div>
+        <strong>${esc(food.name)}</strong>
+        <span>${esc(food.category||"Food")}</span>
+      </div>
+      ${food.favorite ? `<em>usual</em>` : ""}
+    </div>
+    <div class="body-guide">${esc(bodyRef)}</div>
+    <div class="portion-buttons">
+      ${portions.map((p,i) => `<button class="portion-tile" data-add-food="${key}" data-portion-index="${i}">
+        <strong>${esc(p.label)}</strong>
+        <span>${Number(p.carbs||0)}g carbs</span>
+      </button>`).join("")}
+    </div>
+  </article>`;
+}
+
+function renderVisualMealBuilderExperimental(){
+  toast("Visual preview has been removed. Use the food tiles.");
+  return renderFoodBuilder();
+}
+
+function renderVisualMealBuilderExperimental_DISABLED(){
   ensurePlateState();
   const plate = computePlateData();
   layout(`
     <div class="card dark visual-builder-intro">
-      <h2>Build your meal</h2>
-      <p class="tagline" style="text-align:left;margin-top:6px">Tap a dish, build what is really there, then add it to your plate.</p>
+      <button class="btn secondary" id="backToClassicFood">← Back to regular food list</button>
+      <h2 style="margin-top:12px">Visual builder preview</h2>
+      <p class="tagline" style="text-align:left;margin-top:6px">This is not the main meal flow yet. Use the regular food list for dosing.</p>
     </div>
 
     <div class="card plate-mini">
@@ -1450,13 +1745,13 @@ function renderFoodBuilder(){
         <div class="dish-tags">
           ${state.meal.plateDishes.map((d,i) => `<span>${esc(d.dishName)} <button data-remove-dish="${i}" aria-label="Remove ${esc(d.dishName)}">×</button></span>`).join("")}
         </div>
-        <button class="btn scarlet full" id="viewPlateBtn">View plate and continue</button>
-      ` : `<p class="muted small">No dishes yet. Start with rice, soup, a drink, or one of Amara's usual foods.</p>`}
+        <button class="btn scarlet full" id="viewPlateBtn">View plate preview</button>
+      ` : `<p class="muted small">No preview dishes yet.</p>`}
     </div>
 
     <div class="card">
-      <h3>Visual builders</h3>
-      <p class="small muted">Foundation set for V2.6.7. More foods can be added safely after this works.</p>
+      <h3>Visual builder preview foods</h3>
+      <p class="small muted">This is kept for future improvement, but it is no longer part of the main insulin flow.</p>
       <div class="builder-grid">
         ${VISUAL_MEAL_BUILDERS.map(b => `
           <button class="builder-card" data-builder="${b.id}">
@@ -1465,28 +1760,20 @@ function renderFoodBuilder(){
             <em>${esc(builderTypeLabel(b.type))}</em>
           </button>`).join("")}
       </div>
-      <div class="body-ref-note">These are starting guides. As you grow, ask an adult to help you update them.</div>
-    </div>
-
-    <div class="card">
-      <h3>Need another food?</h3>
-      <p class="small muted">Use the original food search if the visual builder does not have this food yet.</p>
-      <button class="btn secondary full" id="classicFoodSearch">Use classic food search</button>
     </div>`, "meal");
 
+  document.getElementById("backToClassicFood").onclick = () => renderClassicFoodBuilder();
   document.querySelectorAll("[data-builder]").forEach(btn => btn.onclick = () => renderDishBuilder(btn.dataset.builder));
   document.querySelectorAll("[data-remove-dish]").forEach(btn => btn.onclick = () => {
     const idx = Number(btn.dataset.removeDish);
     state.meal.plateDishes.splice(idx,1);
     rebuildMealItemsFromPlate();
-    toast("Removed from plate.");
-    renderFoodBuilder();
+    toast("Removed from preview plate.");
+    renderVisualMealBuilderExperimental();
   });
   const viewBtn = document.getElementById("viewPlateBtn");
   if(viewBtn) viewBtn.onclick = () => renderPlateView();
-  document.getElementById("classicFoodSearch").onclick = () => renderClassicFoodBuilder();
 }
-
 function builderIcon(type){
   return ({ bowl:"🥣", stack:"🍔", plate:"🍽️", pour:"🥛", count:"🔢" })[type] || "🍽️";
 }
@@ -1752,7 +2039,7 @@ function renderClassicFoodBuilder(){
     state.foodCategory = btn.dataset.foodCat;
     state.foodSearch = "";
     if(state.foodCategory === "Add Food") renderCustomFoodForm("meal");
-    else renderFoodBuilder();
+    else renderClassicFoodBuilder();
   });
   const searchInput = document.getElementById("foodSearch");
   if(searchInput) searchInput.oninput = () => { state.foodSearch = searchInput.value; drawFoodResults(); };

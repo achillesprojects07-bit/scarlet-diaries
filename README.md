@@ -1,6 +1,6 @@
-# The Scarlet Diaries — V2.6.7
+# The Scarlet Diaries — V2.6.10
 
-**Build name:** Visual Meal Builder Foundation
+**Build name:** Clean Food Tiles — Visual Preview Removed
 **Base preserved from:** V2.6.2 Include-All Header Build  
 **Tagline:** Every drop. Every page. Unstoppable.
 
@@ -402,3 +402,64 @@ Important language update:
 
 - The app tagline was changed to **Every drop. Every page. Unstoppable.**
 - The new meal builder does not use the banned page/pagee/pageing wording.
+
+
+---
+
+## V2.6.8 — Stability Rollback
+
+This build responds to live testing of V2.6.7.
+
+Changed:
+
+- Restored the original dark Scarlet Diaries background after the pink test did not work.
+- Returned **Before I Eat** to the proven classic food picker as the default flow.
+- Kept the visual meal builder only as a preview button, no longer part of the main insulin flow.
+- Removed the confusing plate-zone screen from the default flow.
+- Strengthened the high-glucose ketone choice buttons so options like **No strips** and **I checked — negative** proceed reliably.
+- Preserved V2.6.4 check-in behavior, V2.6.5 Lantus shortcut, and V2.6.6/V2.6.7 project history.
+
+
+---
+
+## V2.6.9 — Food Tile Builder Redesign
+
+Built from V2.6.8 Stability Rollback.
+
+This replaces the failed visual plate / SVG builder concept with a safer, clearer **Food Tile Builder**.
+
+Changed:
+
+- Before I Eat now uses guided food tiles instead of the confusing plate graphic.
+- Food categories are shown as simple horizontal tiles.
+- Each food card shows:
+  - food name
+  - category
+  - portion buttons
+  - carb grams
+  - body-reference guide
+- Meal So Far stays visible with:
+  - total carbs
+  - item count
+  - protein status
+  - vegetable status
+- Continue still goes to hidden-carb check and then Suggested Apidra.
+- Adult Confirmed still auto-saves meal and Apidra.
+- Classic food search remains available as fallback.
+- Original dark Scarlet Diaries background remains restored.
+- V2.6.4 daily check-in behavior and V2.6.5 Lantus shortcut are preserved.
+
+
+---
+
+## V2.6.10 — Clean Food Tiles, Visual Preview Removed
+
+Built from V2.6.9.
+
+Changed:
+
+- Removed the Visual Builder Preview from the UI.
+- Removed the default visual-builder foods from the user-facing flow.
+- Kept the Food Tile Builder as the main Before I Eat experience.
+- Restored the blackish-purple Scarlet Diaries background more strongly.
+- Preserved Suggested Apidra, Adult Confirmed save, daily check-in behavior, and I Took Lantus.
